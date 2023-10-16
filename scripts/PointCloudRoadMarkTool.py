@@ -68,15 +68,13 @@ import json
 point_coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
 point_colors = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
 original_coords = None
-global_kdtree = None #The loaded ckdtree of coords that all functions can access
+points_kdtree = None #The loaded ckdtree of coords that all functions can access
 collection_name = "Collection"
 point_cloud_point_size =  1
 shape_counter=1 #Keeps track of amount of shapes currently in viewport
 auto_load=True # Automatically imports a file called auto.laz on every execution 
 auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz
  
-render_point_cloud=True #Set to false to prevent rendering point cloud in viewport
-
 #Keeps track of all objects created/removed for undo/redo functions
 undo_stack = []
 redo_stack = []
@@ -86,13 +84,16 @@ last_processed_index = 0
 
 #Global variable to store the handler reference
 draw_handler = None
-useless_variable=10
+
+render_point_cloud=False
+
 #Function to load the point cloud, store it's data and draw it using openGL           
 def pointcloud_load(path, point_size, sparsity_value):
     
+    clear_draw_handler()
     start_time = time.time()
-    global point_coords, point_colors, original_coords, global_kdtree, render_point_cloud, draw_handler
-    
+    global point_coords, point_colors, original_coords, global_kdtree, draw_handler
+   
     base_file_name = os.path.basename(path)
     directory_path = os.path.dirname(path)
     saved_data_path = os.path.join(directory_path, "Stored Data")
@@ -158,7 +159,7 @@ def pointcloud_load(path, point_size, sparsity_value):
      
     print("kdtree loaded in: ", time.time() - start_time)
      
-    if render_point_cloud: 
+    if render_point_cloud == True: 
 
         #Converting to tuple 
         coords = tuple(map(tuple, points_ar))
@@ -179,15 +180,19 @@ def pointcloud_load(path, point_size, sparsity_value):
             bgl.glEnable(bgl.GL_DEPTH_TEST)
             batch.draw(shader)
             bgl.glDisable(bgl.GL_DEPTH_TEST)
-            
-        print("openGL point cloud drawn")   
-         
-        # If a previous handler exists, remove it before creating a new one
-        if draw_handler is not None:
-            bpy.types.SpaceView3D.draw_handler_remove(draw_handler, 'WINDOW')
-
+  
         draw_handler = bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW')
-     
+        print("openGL point cloud drawn in:",time.time() - start_time) 
+
+def clear_draw_handler():
+    global draw_handler
+
+    # If a draw handler was already registered, remove it
+    if draw_handler is not None:
+        bpy.types.SpaceView3D.draw_handler_remove(draw_handler, 'WINDOW')
+        draw_handler = None
+        print("Existing draw handler cleared.")
+             
 def create_point_cloud_object(points_ar, colors_ar, point_size, collection_name):
     
       #Create a new mesh
@@ -507,7 +512,7 @@ class SelectPointsOperator(bpy.types.Operator):
 
             # Perform nearest-neighbor search
             radius=20
-            _, nearest_indices = global_kdtree.query([location], k=radius)
+            _, nearest_indices = points_kdtree.query([location], k=radius)
             nearest_colors = [point_colors[i] for i in nearest_indices[0]]
 
             average_intensity = get_average_intensity(nearest_indices[0])
@@ -535,7 +540,7 @@ class FastMarkOperator(bpy.types.Operator):
     bl_label = "Mark Road Markings fast"
 
     def modal(self, context, event):
-        global point_coords, point_colors, global_kdtree
+        global point_coords, point_colors, points_kdtree
         intensity_threshold = context.scene.intensity_threshold
         
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
@@ -555,7 +560,7 @@ class FastMarkOperator(bpy.types.Operator):
             # Do a nearest-neighbor search
             num_neighbors = 16  # Number of neighbors 
             radius = 50
-            _, nearest_indices = global_kdtree.query([location], k=num_neighbors)
+            _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
         
             rectangle_coords = []
             
@@ -580,7 +585,7 @@ class FastMarkOperator(bpy.types.Operator):
                         intensity = np.average(point_colors[current_index]) * 255  # grayscale
                         if intensity>intensity_threshold:
                             rectangle_coords.append(point_coords[current_index])
-                            _, neighbor_indices = global_kdtree.query([point_coords[current_index]], k=radius)
+                            _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
                             indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
 
                 print("Region growing completed", time.time()-start_time)
@@ -612,7 +617,7 @@ class ComplexMarkOperator(bpy.types.Operator):
     bl_label = "Mark complex Road Markings"
 
     def modal(self, context, event):
-        global point_coords, point_colors, global_kdtree
+        global point_coords, point_colors, points_kdtree
         intensity_threshold = context.scene.intensity_threshold
         clicked=None
         if not clicked:
@@ -633,7 +638,7 @@ class ComplexMarkOperator(bpy.types.Operator):
                 # Do a nearest-neighbor search
                 num_neighbors = 16  # Number of neighbors 
                 radius = 100
-                _, nearest_indices = global_kdtree.query([location], k=num_neighbors)
+                _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
             
                 rectangle_coords = []
                 
@@ -661,7 +666,7 @@ class ComplexMarkOperator(bpy.types.Operator):
                             intensity = np.average(point_colors[current_index]) * 255  # grayscale
                             if intensity>intensity_threshold:
                                 rectangle_coords.append(point_coords[current_index])
-                                _, neighbor_indices = global_kdtree.query([point_coords[current_index]], k=radius)
+                                _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
                                 indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
 
                     print("Region growing completed", time.time()-start_time)
@@ -718,7 +723,7 @@ class FindALlRoadMarkingsOperator(bpy.types.Operator):
         start_time = time.time()
         print("Start auto detecting up to",markings_threshold, "road markings.. this could take a while")
         
-        global point_coords, point_colors, global_kdtree
+        global point_coords, point_colors, points_kdtree
         intensity_threshold = context.scene.intensity_threshold
        
         point_threshold = 100
@@ -747,7 +752,7 @@ class FindALlRoadMarkingsOperator(bpy.types.Operator):
                         intensity = np.average(point_colors[current_index]) * 255
                         if intensity > intensity_threshold:
                             rectangle_coords.append(point_coords[current_index])
-                            _, neighbor_indices = global_kdtree.query([point_coords[current_index]], k=radius)
+                            _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
                             indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
                 
                 # Check point count before adding to draw list
@@ -778,7 +783,7 @@ class SelectionDetectionOpterator(bpy.types.Operator):
 
     def modal(self, context, event):
         
-        global point_coords, point_colors, global_kdtree 
+        global point_coords, point_colors, points_kdtree 
         
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
             # Get the mouse coordinates
@@ -790,7 +795,7 @@ class SelectionDetectionOpterator(bpy.types.Operator):
             location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
 
             # Nearest-neighbor search from the point cloud
-            _, closest_indices = global_kdtree.query([location], k=20)
+            _, closest_indices = points_kdtree.query([location], k=20)
             closest_point = point_coords[closest_indices[0][0]]  # get the closest point
 
             self.region_corners.append(closest_point)  # store the point cloud coordinate
@@ -819,7 +824,7 @@ class SelectionDetectionOpterator(bpy.types.Operator):
     
     def find_white_objects_within_region(self):
         # Your global variables (adjust as per actual implementation)
-        global point_coords, point_colors, global_kdtree 
+        global point_coords, point_colors, points_kdtree 
 
         # Define bounding box limits
         min_corner = np.min(self.region_corners, axis=0)
@@ -1042,11 +1047,8 @@ class RemovePointCloudOperator(bpy.types.Operator):
     def execute(self, context):
         
         #set the rendering of the openGL point cloud to off
-        draw_point_cloud = False
-       
-        #redraw the viewport
         redraw_viewport()
-        
+       
         # Find and remove the object with the name "Point Cloud Object"
         for obj in bpy.context.scene.objects:
             if "Point Cloud"in obj.name:
@@ -1084,7 +1086,8 @@ class LAS_OT_AutoOpenOperator(bpy.types.Operator):
     bl_label = "Auto Open LAS File"
 
     def execute(self, context):
-     
+        #global draw_handler
+         
         if not os.path.exists(auto_las_file_path):
             print("Error: The file", auto_las_file_path, "does not exist.")
             return {'CANCELLED'}
@@ -1093,6 +1096,7 @@ class LAS_OT_AutoOpenOperator(bpy.types.Operator):
         point_size = bpy.context.scene.point_size
         print("Opening LAS file:", auto_las_file_path)
         pointcloud_load(auto_las_file_path, point_size, sparsity_value)
+        #draw_handler = bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW')
         print("Finished opening LAS file:", auto_las_file_path)
         return {'FINISHED'}
 
@@ -1200,7 +1204,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         
         layout.operator("wm.las_open", text="Import Point Cloud")
         layout.operator("custom.create_point_cloud_object", text="Create Point Cloud object")
-        layout.operator("custom.remove_point_cloud", text="Remove point cloud object")
+        layout.operator("custom.remove_point_cloud", text="Remove point cloud")
         layout.operator("custom.remove_all_markings", text="Remove All markings")
         
         row = layout.row(align=True)
