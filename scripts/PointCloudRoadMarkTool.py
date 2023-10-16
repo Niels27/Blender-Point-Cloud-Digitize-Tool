@@ -1,13 +1,4 @@
-#installs libraries from a list using pip
-def install_libraries(library_list):
-    for library in library_list:
-        try:
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install', library])
-            print(f"Successfully installed {library}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error installing {library}: {e}")
-            
-# list of libraries to install
+            # list of libraries to install
 library_list = [
     'numpy',
     'open3d',
@@ -20,6 +11,15 @@ library_list = [
     'joblib'
 ]
 
+#installs libraries from a list using pip
+def install_libraries(library_list):
+    for library in library_list:
+        try:
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', library])
+            print(f"Successfully installed {library}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error installing {library}: {e}")
+            
 # uncomment to install libraries 
 #install_libraries(library_list)    
 #uninstall_libraries('library name'):
@@ -64,7 +64,7 @@ from concurrent.futures import ThreadPoolExecutor
 from joblib import dump, load 
 import json
 
-# global variables 
+#Global variables 
 point_coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
 point_colors = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
 original_coords = None
@@ -73,20 +73,25 @@ collection_name = "Collection"
 point_cloud_point_size =  1
 shape_counter=1 #Keeps track of amount of shapes currently in viewport
 auto_load=True # Automatically imports a file called auto.laz on every execution 
-auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz 
-render_point_cloud=True
-#Keeps track of all objects created/removed for undo/redo
+auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz
+ 
+render_point_cloud=True #Set to false to prevent rendering point cloud in viewport
+
+#Keeps track of all objects created/removed for undo/redo functions
 undo_stack = []
 redo_stack = []
 
 #Global variable to keep track of the last processed index
 last_processed_index = 0
 
-#load the point cloud and draws it using openGL           
+#Global variable to store the handler reference
+draw_handler = None
+useless_variable=10
+#Function to load the point cloud, store it's data and draw it using openGL           
 def pointcloud_load(path, point_size, sparsity_value):
     
     start_time = time.time()
-    global point_coords, point_colors, original_coords, global_kdtree, render_point_cloud
+    global point_coords, point_colors, original_coords, global_kdtree, render_point_cloud, draw_handler
     
     base_file_name = os.path.basename(path)
     directory_path = os.path.dirname(path)
@@ -94,13 +99,13 @@ def pointcloud_load(path, point_size, sparsity_value):
     file_name_points = base_file_name + "_points.npy"
     file_name_colors = base_file_name + "_colors.npy"
     file_name_avg_coords = base_file_name + "_avgCoords.npy"
-    file_name_kdtree = base_file_name + "_kdtree.joblib"  # File name for the kdtree
+    file_name_kdtree = base_file_name + "_kdtree.joblib"  #File name for the kdtree
 
-    # Creating the folder where all the stored data will exist
+    #Create the folder where all the stored data will exist
     if not os.path.exists(saved_data_path):
         os.mkdir(saved_data_path)
     
-    # Checking if file is numpy file of the point cloud exist or not
+    #Check if file is numpy file of the point cloud exist or not
     if not os.path.exists(os.path.join(saved_data_path, file_name_points)):
         point_cloud = lp.read(path)
         points_a = np.vstack((point_cloud.x, point_cloud.y, point_cloud.z)).transpose()
@@ -142,26 +147,19 @@ def pointcloud_load(path, point_size, sparsity_value):
     
     # Check if the kdtree file exists
     if not os.path.exists(os.path.join(saved_data_path, file_name_kdtree)):
-        # Create the kdtree if it doesn't exist
+        #Create the kdtree if it doesn't exist
         global_kdtree = cKDTree(np.array(points_ar))
-        #intensity_threshold=120
-        #bright_points = np.array([p for p, c in zip(points_ar, colors_ar) if np.average(c) * 255 > intensity_threshold])
-        #global_kdtree = cKDTree(bright_points)
-
-        # Save the kdtree to a file
+   
+        #Save the kdtree to a file
         dump(global_kdtree, os.path.join(saved_data_path, file_name_kdtree))
     else:
-        # Load the kdtree from the file
+        #Load the kdtree from the file
         global_kdtree = load(os.path.join(saved_data_path, file_name_kdtree))
      
     print("kdtree loaded in: ", time.time() - start_time)
-    
-    # Check if the point cloud is already rendered using a custom property  
-    if render_point_cloud==False: #bpy.context.scene.get("render_point_cloud")==False:
-        print("Point cloud already rendered. Skipping...")
+     
+    if render_point_cloud: 
 
-    else:
-       
         #Converting to tuple 
         coords = tuple(map(tuple, points_ar))
         colors = tuple(map(tuple, colors_ar))
@@ -171,57 +169,63 @@ def pointcloud_load(path, point_size, sparsity_value):
             shader, 'POINTS',
             {"pos": coords, "color": colors}
         )
+        
+        #Make sure the viewport is cleared before rendering
+        redraw_viewport()
+        
         #Draw the point cloud using opengl
         def draw():
             gpu.state.point_size_set(point_size)
             bgl.glEnable(bgl.GL_DEPTH_TEST)
             batch.draw(shader)
             bgl.glDisable(bgl.GL_DEPTH_TEST)
-        
-        bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW')
-        print("openGL point cloud drawn")
-        # Set the custom property to True if the point cloud has been rendered
-        #bpy.context.scene["render_point_cloud"] = False
-        render_point_cloud=False
-    
-    
+            
+        print("openGL point cloud drawn")   
+         
+        # If a previous handler exists, remove it before creating a new one
+        if draw_handler is not None:
+            bpy.types.SpaceView3D.draw_handler_remove(draw_handler, 'WINDOW')
+
+        draw_handler = bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW')
+     
 def create_point_cloud_object(points_ar, colors_ar, point_size, collection_name):
-      # Create a new mesh
+    
+      #Create a new mesh
       mesh = bpy.data.meshes.new("Point Cloud Mesh")
 
-      # Link the mesh to the object
+      #Link the mesh to the object
       obj = bpy.data.objects.new("Point Cloud Object", mesh)
 
-      # Link the object to the specified collection
+      #Link the object to the specified collection
       collection = bpy.data.collections.get(collection_name)
       if collection:
         collection.objects.link(obj)
 
-      # Link the mesh to the scene
+      #Link the mesh to the scene
       bpy.context.scene.collection.objects.link(obj)
 
-      # Set the mesh vertices
+      #Set the mesh vertices
       mesh.from_pydata(points_ar, [], [])
 
-      # Create a new material for the object
+      #Create a new material for the object
       material = bpy.data.materials.new("Point Cloud Material")
       material.use_nodes = True  # Enable material nodes
 
-      # Clear default nodes
+      #Clear default nodes
       material.node_tree.nodes.clear()
 
-      # Create an emission shader node
+      #Create an emission shader node
       emission_node = material.node_tree.nodes.new(type='ShaderNodeEmission')
       emission_node.location = (0, 0)
 
-      # Create a Shader to RGB node to convert vertex colors to shader input
+      #Create a Shader to RGB node to convert vertex colors to shader input
       shader_to_rgb = material.node_tree.nodes.new(type='ShaderNodeShaderToRGB')
       shader_to_rgb.location = (200, 0)
 
-      # Connect the emission shader to the shader to RGB node
+      #Connect the emission shader to the shader and the RGB node
       material.node_tree.links.new(emission_node.outputs['Emission'], shader_to_rgb.inputs['Shader'])
 
-      # Connect the shader to RGB node to the material output
+      #Connect the shader to RGB node to the material output
       material_output_node = material.node_tree.nodes.new(type='ShaderNodeOutputMaterial')
       material_output_node.location = (400, 0)
       material.node_tree.links.new(shader_to_rgb.outputs['Color'], material_output_node.inputs['Surface'])
@@ -230,7 +234,7 @@ def create_point_cloud_object(points_ar, colors_ar, point_size, collection_name)
       emission_node.inputs['Color'].default_value = (1.0, 1.0, 1.0, 1.0)  
       emission_node.inputs['Strength'].default_value = 1.0  
 
-      # Check if the mesh has vertex colors
+      #Check if the mesh has vertex colors
       if len(colors_ar) == len(points_ar):
         # Give the mesh has loop colors
         if not mesh.vertex_colors.active:
@@ -267,7 +271,7 @@ class CreatePointCloudObjectOperator(bpy.types.Operator):
         return {'FINISHED'}
     
 
-
+#Defines an Operator for drawing a free straight line in the viewport using mouseclicks
 class DrawStraightLineOperator(bpy.types.Operator):
     bl_idname = "custom.draw_straight_line"
     bl_label = "Draw Straight Line"
@@ -340,6 +344,7 @@ class DrawStraightLineOperator(bpy.types.Operator):
             context.object.select_set(True)
             bpy.ops.object.delete()
             
+#Function to create a colored, resizable line object on top of the line      
 def create_rectangle_object(start, end, width):
         context = bpy.context
         marking_color = context.scene.marking_color
@@ -379,7 +384,7 @@ def create_rectangle_object(start, end, width):
         # Add faces
         bm.faces.new(bm.verts)
 
-        # Update and free bmesh to improve memory performance
+        # Update and free bmesh to reduce memory usage
         bm.to_mesh(mesh)
         bm.free()
 
@@ -393,7 +398,7 @@ def create_rectangle_object(start, end, width):
 
         return obj
 
-
+#Defines an Operator for drawing a free thick straight line in the viewport using mouseclicks
 class DrawStraightFatLineOperator(bpy.types.Operator):
     
     bl_idname = "view3d.line_drawer"
@@ -701,67 +706,8 @@ def get_average_color(indices):
     return average_color
 
 
-#Scans the entire point cloud for road markings      
-class FindALlRoadMarkings1(bpy.types.Operator):
-    
-    bl_idname = "custom.find_all_road_marks"
-    bl_label = "Finds all road marks"
-   
-    
-    def execute(self, context):
-        
-        markings_threshold = context.scene.markings_threshold
-        start_time=time.time()
-        print("start detecting all road markings.. this might take a while")
-        global point_coords, point_colors, global_kdtree
-        intensity_threshold = context.scene.intensity_threshold
-       
-        point_threshold = 100  # Minimum number of points to draw shape on top
-
-        checked_indices = set()
-        all_white_object_coords = []
-        white_objects_count = 0 
-        radius=100 #Lower is faster, but above ~70 seems needed to prevent segmentations
-        n=1 #Spatial downsampling factor, higher means way faster but way less accurate
-        max_road_marks = markings_threshold #Stops the code when this amount of white road marks bigger than 100 points have been found
-        
-        for idx, color in enumerate(point_colors[::n]):
-            
-            if white_objects_count >= max_road_marks:
-                break
-            
-            if idx in checked_indices:
-                continue
-
-            intensity = np.average(color) * 255  
-            if intensity > intensity_threshold:
-                rectangle_coords = []
-                indices_to_check = [idx]
-                while indices_to_check:
-                    current_index = indices_to_check.pop()
-                    if current_index not in checked_indices:
-                        checked_indices.add(current_index)
-                        intensity = np.average(point_colors[current_index]) * 255
-                        if intensity > intensity_threshold:
-                            rectangle_coords.append(point_coords[current_index])
-                            _, neighbor_indices = global_kdtree.query([point_coords[current_index]], k=radius)
-                            indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
-                
-                # Check point count before adding to draw list
-                if len(rectangle_coords) >= point_threshold:
-                    all_white_object_coords.append(rectangle_coords)
-                    white_objects_count += 1  # Increment counter when valid white object is found
-                    
-        print("finished detecting road marks, amount: ", white_objects_count, "in: ",time.time()-start_time)
-        start_time=time.time()
-        for white_object_coords in all_white_object_coords:
-            create_combined_dots_shape(white_object_coords)
-        
-        print("rendered shapes in: ", time.time()-start_time)
-        
-        return {'FINISHED'}
-
-class FindALlRoadMarkings(bpy.types.Operator):
+#Operator to scans the entire point cloud for road markings, then mark them   
+class FindALlRoadMarkingsOperator(bpy.types.Operator):
     bl_idname = "custom.find_all_road_marks"
     bl_label = "Finds all road marks"
 
@@ -1001,7 +947,7 @@ def create_combined_shape(coords_list):
     store_object_state(obj)
     print("rendered road mark shape in: ", time.time()-start_time)
     
-# Define a function to create multiple squares on top of detected points, then combines them
+# Define a function to create multiple squares on top of detected points, then combines them into one shape
 def create_combined_dots_shape(coords_list):
     
     start_time=time.time()
@@ -1070,7 +1016,7 @@ def create_combined_dots_shape(coords_list):
 
 
              
-# Operator to remove all drawn markings
+#Operator to remove all drawn markings from the scene collection
 class RemoveAllMarkingsOperator(bpy.types.Operator):
     bl_idname = "custom.remove_all_markings"
     bl_label = "Remove All Lines"
@@ -1100,7 +1046,6 @@ class RemovePointCloudOperator(bpy.types.Operator):
        
         #redraw the viewport
         redraw_viewport()
-        print("viewport redrawn")
         
         # Find and remove the object with the name "Point Cloud Object"
         for obj in bpy.context.scene.objects:
@@ -1172,13 +1117,22 @@ def save_kdtree_to_file(file_path, kdtree):
 
 def redraw_viewport():
     
-    #bpy.context.scene["render_point_cloud"] = True
+    global draw_handler  # Reference the global variable
+
+    if draw_handler is not None:
+        # Remove the handler reference, stopping the draw calls
+        bpy.types.SpaceView3D.draw_handler_remove(draw_handler, 'WINDOW')
+        draw_handler = None
+        print("Stopped drawing the point cloud.")
+
+    # Redraw the 3D view to reflect the removal of the point cloud
     for window in bpy.context.window_manager.windows:
         for area in window.screen.areas:
-            if (area.type == 'VIEW_3D'):
-                print("viewport redrawn")
-                area.tag_redraw()
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()        
                 
+    print("viewport redrawn")
+    
 class OBJECT_OT_simple_undo(bpy.types.Operator):
     bl_idname = "object.simple_undo"
     bl_label = "Simple Undo"
@@ -1244,7 +1198,6 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         layout = self.layout
         scene = context.scene
         
-        # Import Point Cloud button
         layout.operator("wm.las_open", text="Import Point Cloud")
         layout.operator("custom.create_point_cloud_object", text="Create Point Cloud object")
         layout.operator("custom.remove_point_cloud", text="Remove point cloud object")
@@ -1327,9 +1280,8 @@ def register():
         size=4
         
     )
-    #bpy.types.Scene.render_point_cloud = BoolProperty(name=" Render Point Cloud",
-                                      #default=True)
-    bpy.utils.register_class(FindALlRoadMarkings)
+  
+    bpy.utils.register_class(FindALlRoadMarkingsOperator)
     bpy.utils.register_class(OBJECT_OT_simple_undo)
     bpy.utils.register_class(OBJECT_OT_simple_redo)
   
@@ -1349,12 +1301,11 @@ def unregister():
     
     bpy.utils.unregister_class(CreatePointCloudObjectOperator)
     bpy.utils.unregister_class(LAS_OT_AutoOpenOperator)
-    bpy.utils.unregister_class(FindALlRoadMarkings)
+    bpy.utils.unregister_class(FindALlRoadMarkingsOperator)
     del bpy.types.Scene.marking_color
     del bpy.types.Scene.intensity_threshold
     del bpy.types.Scene.markings_threshold
     del bpy.types.Scene.fatline_width
-    #del bpy.types.Scene.render_point_cloud
     bpy.utils.unregister_class(OBJECT_OT_simple_undo)
     bpy.utils.unregister_class(OBJECT_OT_simple_redo)
     
@@ -1371,5 +1322,5 @@ if __name__ == "__main__":
     
     if(auto_load):
         bpy.ops.wm.las_auto_open()
-    #bpy.context.scene.get("render_point_cloud")==True
+    
   
