@@ -74,7 +74,7 @@ point_cloud_point_size =  1
 shape_counter=1 #Keeps track of amount of shapes currently in viewport
 auto_load=True # Automatically imports a file called auto.laz on every execution 
 auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz 
-render_point_cloud=False
+render_point_cloud=True
 #Keeps track of all objects created/removed for undo/redo
 undo_stack = []
 redo_stack = []
