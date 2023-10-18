@@ -65,8 +65,8 @@ from joblib import dump, load
 import json
 
 #Global variables 
-point_coords = np.array([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
-point_colors = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+point_coords = None
+point_colors = None
 original_coords = None
 points_kdtree = None #The loaded ckdtree of coords that all functions can access
 collection_name = "Collection"
@@ -79,20 +79,15 @@ auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/a
 undo_stack = []
 redo_stack = []
 
-#Global variable to keep track of the last processed index
+#Global variable to keep track of the last processed index, for numbering road marks by different functions
 last_processed_index = 0
-
-#Global variable to store the handler reference
-draw_handler = None
-
-render_point_cloud=True
 
 #Function to load the point cloud, store it's data and draw it using openGL           
 def pointcloud_load(path, point_size, sparsity_value):
     
-    clear_draw_handler()
     start_time = time.time()
-    global point_coords, point_colors, original_coords, points_kdtree, draw_handler
+    
+    global point_coords, point_colors, original_coords, points_kdtree #draw_handler
    
     base_file_name = os.path.basename(path)
     directory_path = os.path.dirname(path)
@@ -158,32 +153,44 @@ def pointcloud_load(path, point_size, sparsity_value):
         points_kdtree = load(os.path.join(saved_data_path, file_name_kdtree))
      
     print("kdtree loaded in: ", time.time() - start_time)
-     
-    if render_point_cloud == True: 
+    
+    try: 
+        draw_handler = bpy.app.driver_namespace.get('my_draw_handler')
+        
+        if draw_handler is None:
 
-        #Converting to tuple 
-        coords = tuple(map(tuple, points_ar))
-        colors = tuple(map(tuple, colors_ar))
-        
-        shader = gpu.shader.from_builtin('3D_FLAT_COLOR')
-        batch = batch_for_shader(
-            shader, 'POINTS',
-            {"pos": coords, "color": colors}
-        )
-        
-        #Make sure the viewport is cleared before rendering
-        redraw_viewport()
-        
-        #Draw the point cloud using opengl
-        def draw():
-            gpu.state.point_size_set(point_size)
-            bgl.glEnable(bgl.GL_DEPTH_TEST)
-            batch.draw(shader)
-            bgl.glDisable(bgl.GL_DEPTH_TEST)
-  
-        draw_handler = bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW')
-        print("openGL point cloud drawn in:",time.time() - start_time) 
-
+            #Converting to tuple 
+            coords = tuple(map(tuple, points_ar))
+            colors = tuple(map(tuple, colors_ar))
+            
+            shader = gpu.shader.from_builtin('3D_FLAT_COLOR')
+            batch = batch_for_shader(
+                shader, 'POINTS',
+                {"pos": coords, "color": colors}
+            )
+            
+            #Make sure the viewport is cleared before rendering
+            redraw_viewport()
+            
+            #Draw the point cloud using opengl
+            def draw():
+                gpu.state.point_size_set(point_size)
+                bgl.glEnable(bgl.GL_DEPTH_TEST)
+                batch.draw(shader)
+                bgl.glDisable(bgl.GL_DEPTH_TEST)
+                
+            #Define draw handler to acces the drawn point cloud later on
+            draw_handler = bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW')
+            #Store the draw handler reference in the driver namespace
+            bpy.app.driver_namespace['my_draw_handler'] = draw_handler
+            
+            print("openGL point cloud drawn in:",time.time() - start_time) 
+            
+        else:
+            print("Draw handler already exists, skipping drawing")
+    except Exception as e:
+        # Handle any other exceptions that might occur
+        print(f"An error occurred: {e}")
              
 def create_point_cloud_object(points_ar, colors_ar, point_size, collection_name):
     
@@ -226,8 +233,7 @@ def create_point_cloud_object(points_ar, colors_ar, point_size, collection_name)
       material_output_node = material.node_tree.nodes.new(type='ShaderNodeOutputMaterial')
       material_output_node.location = (400, 0)
       material.node_tree.links.new(shader_to_rgb.outputs['Color'], material_output_node.inputs['Surface'])
-
-      
+ 
       emission_node.inputs['Color'].default_value = (1.0, 1.0, 1.0, 1.0)  
       emission_node.inputs['Strength'].default_value = 1.0  
 
@@ -1010,9 +1016,7 @@ def create_combined_dots_shape(coords_list):
     
     # After the object is created, store it 
     store_object_state(obj)
-
-
-             
+          
 #Operator to remove all drawn markings from the scene collection
 class RemoveAllMarkingsOperator(bpy.types.Operator):
     bl_idname = "custom.remove_all_markings"
@@ -1048,8 +1052,6 @@ class RemovePointCloudOperator(bpy.types.Operator):
                 break
       
         return {'FINISHED'}
-
-    
  
 class LAS_OT_OpenOperator(bpy.types.Operator):
     
@@ -1059,11 +1061,11 @@ class LAS_OT_OpenOperator(bpy.types.Operator):
     filepath: bpy.props.StringProperty(subtype="FILE_PATH")
     
     def execute(self, context):
+        redraw_viewport()
         start_time = time.time()
         bpy.context.scene["Filepath to the loaded pointcloud"] = self.filepath
         sparsity_value = bpy.context.scene.sparsity_value
         point_size = bpy.context.scene.point_size
-        redraw_viewport()
         pointcloud_load(self.filepath, point_size, sparsity_value)
         print("Opening LAS file: ", self.filepath)
         print("--- %s seconds ---" % (time.time() - start_time))
@@ -1078,8 +1080,7 @@ class LAS_OT_AutoOpenOperator(bpy.types.Operator):
     bl_label = "Auto Open LAS File"
 
     def execute(self, context):
-        #global draw_handler
-         
+
         if not os.path.exists(auto_las_file_path):
             print("Error: The file", auto_las_file_path, "does not exist.")
             return {'CANCELLED'}
@@ -1088,7 +1089,6 @@ class LAS_OT_AutoOpenOperator(bpy.types.Operator):
         point_size = bpy.context.scene.point_size
         print("Opening LAS file:", auto_las_file_path)
         pointcloud_load(auto_las_file_path, point_size, sparsity_value)
-        #draw_handler = bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW')
         print("Finished opening LAS file:", auto_las_file_path)
         return {'FINISHED'}
 
@@ -1111,14 +1111,19 @@ def save_kdtree_to_file(file_path, kdtree):
     with open(file_path, 'w') as file:
         json.dump(kdtree_data, file)
 
+# Clears the viewport and deletes the draw handler
 def redraw_viewport():
     
-    global draw_handler  # Reference the global variable
-
+    #global draw_handler  # Reference the global variable
+    draw_handler = bpy.app.driver_namespace.get('my_draw_handler')
+    
     if draw_handler is not None:
         # Remove the handler reference, stopping the draw calls
         bpy.types.SpaceView3D.draw_handler_remove(draw_handler, 'WINDOW')
-        draw_handler = None
+        #draw_handler = None
+        del bpy.app.driver_namespace['my_draw_handler']
+
+        print("Draw handler removed successfully.")
         print("Stopped drawing the point cloud.")
 
     # Redraw the 3D view to reflect the removal of the point cloud
@@ -1128,15 +1133,6 @@ def redraw_viewport():
                 area.tag_redraw()        
                 
     print("viewport redrawn")
-
-def clear_draw_handler():
-    global draw_handler
-
-    # If a draw handler was already registered, remove it
-    if draw_handler is not None:
-        bpy.types.SpaceView3D.draw_handler_remove(draw_handler, 'WINDOW')
-        draw_handler = None
-        print("Existing draw handler cleared.")
             
 class OBJECT_OT_simple_undo(bpy.types.Operator):
     bl_idname = "object.simple_undo"
@@ -1274,6 +1270,15 @@ def register():
         default=0.2,
         min=0.01, max=10,  #min and max width
         subtype='NONE'  
+        
+    )
+    bpy.types.Scene.marking_color = bpy.props.FloatVectorProperty(
+        name="Marking Color",
+        subtype='COLOR',
+        description="Select Marking color",
+        default=(1, 0, 0, 1),  # Default is red
+        min=0.0, max=1.0,  # Colors range from 0 to 1
+        size=4
         
     )
     bpy.types.Scene.marking_color = bpy.props.FloatVectorProperty(
