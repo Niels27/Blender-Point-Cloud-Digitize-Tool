@@ -1,4 +1,4 @@
-            # list of libraries to install
+# list of libraries to install
 library_list = [
     'numpy',
     'open3d',
@@ -85,14 +85,14 @@ last_processed_index = 0
 #Global variable to store the handler reference
 draw_handler = None
 
-render_point_cloud=False
+render_point_cloud=True
 
 #Function to load the point cloud, store it's data and draw it using openGL           
 def pointcloud_load(path, point_size, sparsity_value):
     
     clear_draw_handler()
     start_time = time.time()
-    global point_coords, point_colors, original_coords, global_kdtree, draw_handler
+    global point_coords, point_colors, original_coords, points_kdtree, draw_handler
    
     base_file_name = os.path.basename(path)
     directory_path = os.path.dirname(path)
@@ -149,13 +149,13 @@ def pointcloud_load(path, point_size, sparsity_value):
     # Check if the kdtree file exists
     if not os.path.exists(os.path.join(saved_data_path, file_name_kdtree)):
         #Create the kdtree if it doesn't exist
-        global_kdtree = cKDTree(np.array(points_ar))
+        points_kdtree = cKDTree(np.array(points_ar))
    
         #Save the kdtree to a file
-        dump(global_kdtree, os.path.join(saved_data_path, file_name_kdtree))
+        dump(points_kdtree, os.path.join(saved_data_path, file_name_kdtree))
     else:
         #Load the kdtree from the file
-        global_kdtree = load(os.path.join(saved_data_path, file_name_kdtree))
+        points_kdtree = load(os.path.join(saved_data_path, file_name_kdtree))
      
     print("kdtree loaded in: ", time.time() - start_time)
      
@@ -184,14 +184,6 @@ def pointcloud_load(path, point_size, sparsity_value):
         draw_handler = bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW')
         print("openGL point cloud drawn in:",time.time() - start_time) 
 
-def clear_draw_handler():
-    global draw_handler
-
-    # If a draw handler was already registered, remove it
-    if draw_handler is not None:
-        bpy.types.SpaceView3D.draw_handler_remove(draw_handler, 'WINDOW')
-        draw_handler = None
-        print("Existing draw handler cleared.")
              
 def create_point_cloud_object(points_ar, colors_ar, point_size, collection_name):
     
@@ -1136,7 +1128,16 @@ def redraw_viewport():
                 area.tag_redraw()        
                 
     print("viewport redrawn")
-    
+
+def clear_draw_handler():
+    global draw_handler
+
+    # If a draw handler was already registered, remove it
+    if draw_handler is not None:
+        bpy.types.SpaceView3D.draw_handler_remove(draw_handler, 'WINDOW')
+        draw_handler = None
+        print("Existing draw handler cleared.")
+            
 class OBJECT_OT_simple_undo(bpy.types.Operator):
     bl_idname = "object.simple_undo"
     bl_label = "Simple Undo"
