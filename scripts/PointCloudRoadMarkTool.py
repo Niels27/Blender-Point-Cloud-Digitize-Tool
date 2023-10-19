@@ -83,6 +83,9 @@ redo_stack = []
 #Global variable to keep track of the last processed index, for numbering road marks by different functions
 last_processed_index = 0
 
+# Global variable to keep track of the active operator
+active_operator = None
+
 #Function to load the point cloud, store it's data and draw it using openGL           
 def pointcloud_load(path, point_size, sparsity_value):
     
@@ -508,38 +511,45 @@ def create_rectangle_object(start, end, width):
         return obj
 
 #Prints the point cloud coordinates and the average color & intensity around mouse click        
-class SelectPointsOperator(bpy.types.Operator):
+class GetPointsInfoOperator(bpy.types.Operator):
     bl_idname = "view3d.select_points"
-    bl_label = "Select Points"
+    bl_label = "Get Points information"
 
     def modal(self, context, event):
         
         global point_coords, point_colors
         
-        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
-            # Get the mouse coordinates
-            x, y = event.mouse_region_x, event.mouse_region_y
-            # Convert 2D mouse coordinates to 3D view coordinates
-            view3d = context.space_data
-            region = context.region
-            region_3d = context.space_data.region_3d
-            location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
+        if event.type == 'MOUSEMOVE':  
+            self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
 
-            # Get the z coordinate from 3d space
-            z = location.z
 
-            # Perform nearest-neighbor search
-            radius=20
-            _, nearest_indices = points_kdtree.query([location], k=radius)
-            nearest_colors = [point_colors[i] for i in nearest_indices[0]]
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
+            if context.area and context.area.type == 'VIEW_3D':
+                # Get the mouse coordinates
+                x, y = event.mouse_region_x, event.mouse_region_y
+                # Convert 2D mouse coordinates to 3D view coordinates
+                view3d = context.space_data
+                region = context.region
+                region_3d = context.space_data.region_3d
+                location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
 
-            average_intensity = get_average_intensity(nearest_indices[0])
-            # Calculate the average color
-            average_color = np.mean(nearest_colors, axis=0)
-            average_color*=255
+                # Get the z coordinate from 3d space
+                z = location.z
+
+                # Perform nearest-neighbor search
+                radius=20
+                _, nearest_indices = points_kdtree.query([location], k=radius)
+                nearest_colors = [point_colors[i] for i in nearest_indices[0]]
+
+                average_intensity = get_average_intensity(nearest_indices[0])
+                # Calculate the average color
+                average_color = np.mean(nearest_colors, axis=0)
+                average_color*=255
+                
+                print("clicked on x,y,z: ",x,y,z,"Average Color:", average_color,"Average intensity: ",average_intensity)
+            else:
+                return {'PASS_THROUGH'}
             
-            print("clicked on x,y,z: ",x,y,z,"Average Color:", average_color,"Average intensity: ",average_intensity)
-
         elif event.type == 'ESC':
             return {'CANCELLED'}  # Stop the operator when ESCAPE is pressed
 
@@ -574,11 +584,16 @@ class FastMarkOperator(bpy.types.Operator):
     bl_idname = "view3d.mark_fast"
     bl_label = "Mark Road Markings fast"
 
+    _is_running = False  # Class variable to check if the operator is already running
+    
     def modal(self, context, event):
         global point_coords, point_colors, points_kdtree
         intensity_threshold = context.scene.intensity_threshold
         
-        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+        if event.type == 'MOUSEMOVE':  
+            self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
+            
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
             
             start_time = time.time()
             # Get the mouse coordinates
@@ -635,40 +650,46 @@ class FastMarkOperator(bpy.types.Operator):
                 
         
         elif event.type == 'ESC':
+            FastMarkOperator._is_running = False
+            print("Operation was cancelled")
             return {'CANCELLED'}  # Stop when ESCAPE is pressed
 
         return {'PASS_THROUGH'}
 
-    def cancel_operator(self, context):
-        print("simple marking has been cancelled!")
     
     def invoke(self, context, event):
-        # If another operator is running, cancel it
-        if context.window_manager.operators:
-            for operator in context.window_manager.operators:
-                # Check if the operator has a 'cancel_operator' method before calling it
-                if hasattr(operator, 'cancel_operator'): #and operator.bl_idname != self.bl_idname:
-                    operator.cancel_operator(context)  # Assuming 'cancel_operator' needs the context)           
+        if FastMarkOperator._is_running:
+            self.report({'WARNING'}, "Operator is already running")
+            return {'CANCELLED'}  # Do not run the operator if it's already running
 
         if context.area.type == 'VIEW_3D':
+            FastMarkOperator._is_running = True  # Set the flag to indicate the operator is running
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
+
+    def cancel(self, context):
+        FastMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
+        print("Operator was properly cancelled")  # Debug message
+        return {'CANCELLED'}
         
-#Draws complexer shaped road markings using many tiny squares, which then get combined      
+#Draws complexer shaped road markings using many tiny squares, which then get combined          
 class ComplexMarkOperator(bpy.types.Operator):
     bl_idname = "view3d.mark_complex"
     bl_label = "Mark complex Road Markings"
-
+    _is_running = False  # Class variable to check if the operator is already running
+    
     def modal(self, context, event):
         
         global point_coords, point_colors, points_kdtree
         intensity_threshold = context.scene.intensity_threshold
+        if event.type == 'MOUSEMOVE':  
+            self.mouse_inside_view3d = is_mouse_in_3d_view(context, event) 
         clicked=None
         
         if not clicked:
-            if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+            if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
                 clicked=True
                 start_time = time.time()
                 # Get the mouse coordinates
@@ -728,31 +749,29 @@ class ComplexMarkOperator(bpy.types.Operator):
                     create_combined_dots_shape(rectangle_coords)
                       
             elif event.type == 'ESC':
-                clicked=False 
+                ComplexMarkOperator._is_running = False  # Reset the flag when the operator stops
+                print("Operation was cancelled")  
                 return {'CANCELLED'}  # Stop when ESCAPE is pressed
 
             return {'PASS_THROUGH'}
-        
-    def cancel_operator(self, context):
-        print("complex marking has been cancelled!")
-        return {'CANCELLED'}
-    
+
     def invoke(self, context, event):
-        # If another operator is running, cancel it
-        if context.window_manager.operators:
-            for operator in context.window_manager.operators:
-                # Check if the operator has a 'cancel_operator' method before calling it
-                if hasattr(operator, 'cancel_operator'): #and operator.bl_idname != self.bl_idname:
-                    operator.cancel_operator(context)  # Assuming 'cancel_operator' needs the context)       
-                  
-                    
+        if ComplexMarkOperator._is_running:
+            self.report({'WARNING'}, "Operator is already running")
+            return {'CANCELLED'}  # Do not run the operator if it's already running
+
         if context.area.type == 'VIEW_3D':
+            ComplexMarkOperator._is_running = True  # Set the flag to indicate the operator is running
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
-               
 
+    def cancel(self, context):
+        ComplexMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
+        print("Operator was properly cancelled")  # Debug message
+        return {'CANCELLED'}
+        
 #Operator to scans the entire point cloud for road markings, then mark them   
 class FindALlRoadMarkingsOperator(bpy.types.Operator):
     bl_idname = "custom.find_all_road_marks"
@@ -826,8 +845,10 @@ class SelectionDetectionOpterator(bpy.types.Operator):
     def modal(self, context, event):
         
         global point_coords, point_colors, points_kdtree 
-        
-        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+        if event.type == 'MOUSEMOVE':  
+            self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
+            
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
             # Get the mouse coordinates
             x, y = event.mouse_region_x, event.mouse_region_y
             # Convert 2D mouse coordinates to 3D view coordinates
@@ -1245,6 +1266,40 @@ class OBJECT_OT_simple_redo(bpy.types.Operator):
             obj.update_tag()
             
         return {'FINISHED'}
+
+#Checks whether the mouseclick happened in the viewport or elsewhere    
+def is_mouse_in_3d_view(context, event):
+    # Identify the 3D Viewport area and its regions
+    view_3d_area = next((area for area in context.screen.areas if area.type == 'VIEW_3D'), None)
+    if view_3d_area is not None:
+        toolbar_region = next((region for region in view_3d_area.regions if region.type == 'TOOLS'), None)
+        ui_region = next((region for region in view_3d_area.regions if region.type == 'UI'), None)
+        view_3d_window_region = next((region for region in view_3d_area.regions if region.type == 'WINDOW'), None)
+
+        # Check if the mouse is inside the 3D Viewport's window region
+        if view_3d_window_region is not None:
+            mouse_inside_view3d = (
+                view_3d_window_region.x < event.mouse_x < view_3d_window_region.x + view_3d_window_region.width and 
+                view_3d_window_region.y < event.mouse_y < view_3d_window_region.y + view_3d_window_region.height
+            )
+            
+            # Exclude areas occupied by the toolbar or UI regions
+            if toolbar_region is not None:
+                mouse_inside_view3d &= not (
+                    toolbar_region.x < event.mouse_x < toolbar_region.x + toolbar_region.width and 
+                    toolbar_region.y < event.mouse_y < toolbar_region.y + toolbar_region.height
+                )
+            if ui_region is not None:
+                mouse_inside_view3d &= not (
+                    ui_region.x < event.mouse_x < ui_region.x + ui_region.width and 
+                    ui_region.y < event.mouse_y < ui_region.y + ui_region.height
+                )
+            
+            return mouse_inside_view3d
+
+    return False  # Default to False if checks fail.
+
+
     
 def store_object_state(obj):
     
@@ -1304,7 +1359,10 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row = layout.row()
         row.operator("object.simple_undo", text="Undo")
         row.operator("object.simple_redo", text="Redo")
-        
+               
+         # Dummy space
+        for _ in range(20):  # you can increase or decrease this number
+            layout.label(text="")
             
 # Register the operators and panel
 def register():
@@ -1319,18 +1377,19 @@ def register():
     bpy.types.Scene.sparsity_value = IntProperty(name="SPARSITY VALUE",
                                       default=1)
     bpy.utils.register_class(RemovePointCloudOperator)
-    bpy.utils.register_class(SelectPointsOperator)
+    bpy.utils.register_class(GetPointsInfoOperator)
     
     bpy.utils.register_class(FastMarkOperator)
     bpy.utils.register_class(ComplexMarkOperator)
     bpy.utils.register_class(SelectionDetectionOpterator)
     bpy.utils.register_class(CreatePointCloudObjectOperator)
     
-    bpy.types.Scene.operator_is_running = bpy.props.BoolProperty(
+    """bpy.types.Scene.operator_is_running = bpy.props.BoolProperty(
         name="Operator Is Running",
         description="A flag to indicate whether the operator is running",
         default=False
-    )
+    )"""
+    
     bpy.types.Scene.intensity_threshold = bpy.props.FloatProperty(
         name="Intensity Threshold",
         description="Minimum intensity threshold",
@@ -1392,7 +1451,7 @@ def unregister():
     bpy.utils.unregister_class(RemoveAllMarkingsOperator)
     bpy.utils.unregister_class(DIGITIZE_PT_Panel)
     bpy.utils.unregister_class(RemovePointCloudOperator)
-    bpy.utils.unregister_class(SelectPointsOperator)
+    bpy.utils.unregister_class(GetPointsInfoOperator)
     bpy.utils.unregister_class(FastMarkOperator)
     bpy.utils.unregister_class(ComplexMarkOperator)
     bpy.utils.unregister_class(SelectionDetectionOpterator)
@@ -1405,6 +1464,7 @@ def unregister():
     del bpy.types.Scene.intensity_threshold
     del bpy.types.Scene.markings_threshold
     del bpy.types.Scene.fatline_width
+    #del bpy.types.Scene.operator_is_running
     bpy.utils.unregister_class(OBJECT_OT_simple_undo)
     bpy.utils.unregister_class(OBJECT_OT_simple_redo)
     
