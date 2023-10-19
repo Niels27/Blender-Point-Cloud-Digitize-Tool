@@ -72,6 +72,7 @@ points_kdtree = None #The loaded ckdtree of coords that all functions can access
 collection_name = "Collection"
 point_cloud_point_size =  1
 shape_counter=1 #Keeps track of amount of shapes currently in viewport
+objects_z_height=10 #Height of all markings
 auto_load=True # Automatically imports a file called auto.laz on every execution 
 auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz
  
@@ -299,14 +300,19 @@ class DrawStraightLineOperator(bpy.types.Operator):
     def draw_line(self, context, event):
         view3d = context.space_data
         region = context.region
-        region_3d = context.space_data.region_3d
-        marking_color = context.scene.marking_color
+        region_3d = view3d.region_3d
+        marking_color = context.scene.marking_color  # make sure you have this defined or accessible
+        global objects_z_height
+       
+        # Convert the 2D mouse position to a 3D coordinate
         if self.prev_end_point:
             coord_3d_start = self.prev_end_point
         else:
             coord_3d_start = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
+            coord_3d_start.z = objects_z_height  # Set the Z coordinate
 
         coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
+        coord_3d_end.z = objects_z_height  # Set the Z coordinate
 
         # Create a new mesh object for the line
         mesh = bpy.data.meshes.new(name="Line Mesh")
@@ -319,8 +325,8 @@ class DrawStraightLineOperator(bpy.types.Operator):
         bm = bmesh.new()
 
         # Add vertices
-        bmesh.ops.create_vert(bm, co=coord_3d_start)
-        bmesh.ops.create_vert(bm, co=coord_3d_end)
+        bm.verts.new(coord_3d_start)
+        bm.verts.new(coord_3d_end)
 
         # Add an edge between the vertices
         bm.edges.new(bm.verts)
@@ -331,7 +337,7 @@ class DrawStraightLineOperator(bpy.types.Operator):
 
         # Create a material for the line and set its color
         material = bpy.data.materials.new(name="Line Material")
-        material.diffuse_color = marking_color  #
+        material.diffuse_color = marking_color  # make sure this color is set accordingly
         obj.data.materials.append(material)
 
         self.prev_end_point = coord_3d_end
@@ -347,59 +353,6 @@ class DrawStraightLineOperator(bpy.types.Operator):
             context.object.select_set(True)
             bpy.ops.object.delete()
             
-#Function to create a colored, resizable line object on top of the line      
-def create_rectangle_object(start, end, width):
-        context = bpy.context
-        marking_color = context.scene.marking_color
-        # Calculate the direction vector and its length
-        direction = end - start
-        length = direction.length
-
-        direction.normalize()
-
-        # Calculate the rectangle's width
-        orthogonal = direction.cross(Vector((0, 0, 1)))
-        orthogonal.normalize()
-        orthogonal *= width / 2
-
-        # Calculate the rectangle's vertices
-        v1 = start + orthogonal
-        v2 = start - orthogonal
-        v3 = end - orthogonal
-        v4 = end + orthogonal
-
-        # Create a new mesh object for the rectangle
-        mesh = bpy.data.meshes.new(name="Rectangle Mesh")
-        obj = bpy.data.objects.new("Rectangle Line", mesh)
-
-        # Link it to the scene
-        bpy.context.collection.objects.link(obj)
-
-        # Create mesh from python data
-        bm = bmesh.new()
-
-        # Add vertices
-        bmesh.ops.create_vert(bm, co=v1)
-        bmesh.ops.create_vert(bm, co=v2)
-        bmesh.ops.create_vert(bm, co=v3)
-        bmesh.ops.create_vert(bm, co=v4)
-
-        # Add faces
-        bm.faces.new(bm.verts)
-
-        # Update and free bmesh to reduce memory usage
-        bm.to_mesh(mesh)
-        bm.free()
-
-        # Create a material for the rectangle and set its color
-        material = bpy.data.materials.new(name="Rectangle Material")
-        material.diffuse_color = marking_color  
-        obj.data.materials.append(material)
-
-        # After the object is created, store it 
-        store_object_state(obj)
-
-        return obj
 
 #Defines an Operator for drawing a free thick straight line in the viewport using mouseclicks
 class DrawStraightFatLineOperator(bpy.types.Operator):
@@ -439,10 +392,10 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
             coord_3d_start = self.prev_end_point
         else:
             coord_3d_start = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-            coord_3d_start.z += 0.5  # Add to the z dimension to prevent clipping
+            coord_3d_start.z += objects_z_height  # Add to the z dimension to prevent clipping
 
         coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-        coord_3d_end.z += 0.5  
+        coord_3d_end.z += objects_z_height  
 
         # Create a new mesh object for the line
         mesh = bpy.data.meshes.new(name="Line Mesh")
@@ -486,6 +439,73 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
             context.object.select_set(True)
             bpy.ops.object.delete()    
 
+#Function to create a colored, resizable line object on top of the line      
+def create_rectangle_object(start, end, width):
+    
+        context = bpy.context
+        marking_color = context.scene.marking_color
+        transparency = context.scene.marking_transparency
+        # Calculate the direction vector and its length
+        direction = end - start
+        length = direction.length
+
+        direction.normalize()
+
+        # Calculate the rectangle's width
+        orthogonal = direction.cross(Vector((0, 0, 1)))
+        orthogonal.normalize()
+        orthogonal *= width / 2
+
+        # Calculate the rectangle's vertices
+        v1 = start + orthogonal
+        v2 = start - orthogonal
+        v3 = end - orthogonal
+        v4 = end + orthogonal
+
+        # Create a new mesh object for the rectangle
+        mesh = bpy.data.meshes.new(name="Rectangle Mesh")
+        obj = bpy.data.objects.new("Rectangle Line", mesh)
+
+        # Link it to the scene
+        bpy.context.collection.objects.link(obj)
+
+        # Create mesh from python data
+        bm = bmesh.new()
+
+        # Add vertices
+        bmesh.ops.create_vert(bm, co=v1)
+        bmesh.ops.create_vert(bm, co=v2)
+        bmesh.ops.create_vert(bm, co=v3)
+        bmesh.ops.create_vert(bm, co=v4)
+
+        # Add faces
+        bm.faces.new(bm.verts)
+
+        # Update and free bmesh to reduce memory usage
+        bm.to_mesh(mesh)
+        bm.free()
+
+        # Create a material for the rectangle and set its color
+        material = bpy.data.materials.new(name="Rectangle Material")
+        
+        # Set the color with alpha for transparency
+        material.diffuse_color = (marking_color[0], marking_color[1], marking_color[2], transparency)
+
+        # Adjust the material settings to enable transparency
+        material.use_nodes = True
+        material.blend_method = 'BLEND'  # Use alpha blend mode
+
+        # Set the Principled BSDF shader's alpha value
+        principled_bsdf = next(node for node in material.node_tree.nodes if node.type == 'BSDF_PRINCIPLED')
+        principled_bsdf.inputs['Alpha'].default_value = transparency
+        
+        # Assign the material to the object
+        obj.data.materials.append(material)
+
+        # After the object is created, store it 
+        store_object_state(obj)
+
+        return obj
 
 #Prints the point cloud coordinates and the average color & intensity around mouse click        
 class SelectPointsOperator(bpy.types.Operator):
@@ -531,6 +551,23 @@ class SelectPointsOperator(bpy.types.Operator):
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
+
+def get_average_intensity(indices):
+    total_intensity = 0.0
+    point_amount= len(indices)
+    for index in indices:
+        intensity = np.average(point_colors[index]) * 255  # grayscale
+        total_intensity += intensity
+    return total_intensity / point_amount
+
+def get_average_color(indices):
+    point_amount=len(indices)
+    average_color = np.zeros(3, dtype=float)
+    for index in indices:
+        color = point_colors[index] * 255  # rgb
+        average_color += color
+    average_color /= point_amount
+    return average_color
 
 #Draws simple shapes to mark road markings     
 class FastMarkOperator(bpy.types.Operator):
@@ -602,7 +639,17 @@ class FastMarkOperator(bpy.types.Operator):
 
         return {'PASS_THROUGH'}
 
+    def cancel_operator(self, context):
+        print("simple marking has been cancelled!")
+    
     def invoke(self, context, event):
+        # If another operator is running, cancel it
+        if context.window_manager.operators:
+            for operator in context.window_manager.operators:
+                # Check if the operator has a 'cancel_operator' method before calling it
+                if hasattr(operator, 'cancel_operator'): #and operator.bl_idname != self.bl_idname:
+                    operator.cancel_operator(context)  # Assuming 'cancel_operator' needs the context)           
+
         if context.area.type == 'VIEW_3D':
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
@@ -615,9 +662,11 @@ class ComplexMarkOperator(bpy.types.Operator):
     bl_label = "Mark complex Road Markings"
 
     def modal(self, context, event):
+        
         global point_coords, point_colors, points_kdtree
         intensity_threshold = context.scene.intensity_threshold
         clicked=None
+        
         if not clicked:
             if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
                 clicked=True
@@ -683,31 +732,26 @@ class ComplexMarkOperator(bpy.types.Operator):
                 return {'CANCELLED'}  # Stop when ESCAPE is pressed
 
             return {'PASS_THROUGH'}
-
+        
+    def cancel_operator(self, context):
+        print("complex marking has been cancelled!")
+        return {'CANCELLED'}
+    
     def invoke(self, context, event):
+        # If another operator is running, cancel it
+        if context.window_manager.operators:
+            for operator in context.window_manager.operators:
+                # Check if the operator has a 'cancel_operator' method before calling it
+                if hasattr(operator, 'cancel_operator'): #and operator.bl_idname != self.bl_idname:
+                    operator.cancel_operator(context)  # Assuming 'cancel_operator' needs the context)       
+                  
+                    
         if context.area.type == 'VIEW_3D':
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
                
-def get_average_intensity(indices):
-    total_intensity = 0.0
-    point_amount= len(indices)
-    for index in indices:
-        intensity = np.average(point_colors[index]) * 255  # grayscale
-        total_intensity += intensity
-    return total_intensity / point_amount
-
-def get_average_color(indices):
-    point_amount=len(indices)
-    average_color = np.zeros(3, dtype=float)
-    for index in indices:
-        color = point_colors[index] * 255  # rgb
-        average_color += color
-    average_color /= point_amount
-    return average_color
-
 
 #Operator to scans the entire point cloud for road markings, then mark them   
 class FindALlRoadMarkingsOperator(bpy.types.Operator):
@@ -915,17 +959,24 @@ class SelectionDetectionOpterator(bpy.types.Operator):
 # Define a function to create a single mesh for combined rectangles
 def create_combined_shape(coords_list):
     
-    start_time=time.time()
-    marking_color=context.scene.marking_color
+    start_time = time.time()
+    marking_color = bpy.context.scene.marking_color 
+    transparency = bpy.context.scene.marking_transparency
+
+    global objects_z_height
+    
     # Create a new mesh and link it to the scene
     mesh = bpy.data.meshes.new("Combined Shape")
     obj = bpy.data.objects.new("Combined Shape", mesh)
     bpy.context.collection.objects.link(obj)
 
-    # Create a bmesh object and add vertices to it
+    # Create a bmesh object and add vertices to it, adjusting their Z coordinate
     bm = bmesh.new()
+    adjusted_coords_list = []
     for coords in coords_list:
-        bm.verts.new(coords)
+        adjusted_coords = (coords[0], coords[1], coords[2] + 10.0)  # Adjust Z coordinate
+        adjusted_coords_list.append(adjusted_coords)
+        bm.verts.new(adjusted_coords)
 
     # Create a face from the vertices
     bmesh.ops.convex_hull(bm, input=bm.verts)
@@ -936,16 +987,30 @@ def create_combined_shape(coords_list):
 
     # Create a new material for the combined shape
     shape_material = bpy.data.materials.new(name="shape color")
-    shape_material.diffuse_color = marking_color
+    shape_material.diffuse_color = (marking_color[0], marking_color[1], marking_color[2], transparency) 
 
-    # Assign the red material to the object
+    # Enable transparency in the material settings
+    shape_material.use_nodes = True
+    shape_material.blend_method = 'BLEND'
+
+    # Find the Principled BSDF node and set its alpha value
+    principled_node = next(n for n in shape_material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+    principled_node.inputs['Alpha'].default_value = transparency
+    
+    # Assign the material to the object
     if len(obj.data.materials) > 0:
-        # If the object already has materials, replace the first one with the red material
+        # If the object already has materials, replace the first one with the new material
         obj.data.materials[0] = shape_material
     else:
-        # Otherwise, add the material to the object
+        # Otherwise, add the new material to the object
         obj.data.materials.append(shape_material)
-              
+
+    # Adjust the object's Z location based on the lowest Z coordinate in the adjusted list
+    min_z = min(coord[2] for coord in adjusted_coords_list)
+    z_offset = objects_z_height - min_z  # We want the lowest Z to be at 10.0
+    obj.location.z += z_offset
+
+    
     # After the object is created, store it 
     store_object_state(obj)
     print("rendered road mark shape in: ", time.time()-start_time)
@@ -954,8 +1019,11 @@ def create_combined_shape(coords_list):
 def create_combined_dots_shape(coords_list):
     
     start_time=time.time()
-    global shape_counter
+    global shape_counter, objects_z_height
+    
     marking_color=context.scene.marking_color
+    transparency = bpy.context.scene.marking_transparency
+    
     # Create a new mesh and link it to the scene
     mesh = bpy.data.meshes.new("Combined Shape")
     obj = bpy.data.objects.new("Combined Shape", mesh)
@@ -964,7 +1032,7 @@ def create_combined_dots_shape(coords_list):
     bm = bmesh.new()
 
     square_size = 0.025  # Size of each square
-    z_offset = 0.1  # Offset in Z coordinate
+    z_offset = objects_z_height  # Offset in Z coordinate
     max_gap = 10  # Maximum gap size to fill
 
     # Sort the coordinates by distance
@@ -1000,8 +1068,15 @@ def create_combined_dots_shape(coords_list):
 
     # Create a new material for the combined shape
     shape_material = bpy.data.materials.new(name="shape material")
-    shape_material.diffuse_color = marking_color
+    shape_material.diffuse_color = (marking_color[0], marking_color[1], marking_color[2], transparency)
+    # Enable transparency in the material settings
+    shape_material.use_nodes = True
+    shape_material.blend_method = 'BLEND'
 
+    # Find the Principled BSDF node and set its alpha value
+    principled_node = next(n for n in shape_material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+    principled_node.inputs['Alpha'].default_value = transparency
+    
     # Assign the material to the object
     if len(obj.data.materials) > 0:
         # If the object already has materials, replace the first one with the  material
@@ -1207,15 +1282,18 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row = layout.row(align=True)
         layout.operator("view3d.select_points", text="Get point color & intensity")
         layout.prop(scene, "intensity_threshold")
+        
+        row = layout.row()
         layout.prop(scene, "marking_color")
-        layout.operator("custom.draw_straight_line", text="Draw Simple Line")
+        layout.prop(scene, "marking_transparency")
+        #layout.operator("custom.draw_straight_line", text="Draw Simple Line")
         
         row = layout.row(align=True)
-        row.operator("view3d.line_drawer", text="Colored Line")
+        row.operator("view3d.line_drawer", text="Draw Line")
         row.prop(scene, "fatline_width")
  
         row = layout.row(align=True)
-        layout.operator("view3d.mark_fast", text="Fast marker")
+        layout.operator("view3d.mark_fast", text="Simple marker")
         layout.operator("view3d.mark_complex", text="Complex shape marker")
         layout.operator("view3d.selection_detection", text="Selection Marker")
         
@@ -1231,7 +1309,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
 # Register the operators and panel
 def register():
     bpy.utils.register_class(LAS_OT_OpenOperator)
-
+    bpy.utils.register_class(LAS_OT_AutoOpenOperator)
     bpy.utils.register_class(DrawStraightLineOperator)
     bpy.utils.register_class(DrawStraightFatLineOperator)
     bpy.utils.register_class(RemoveAllMarkingsOperator)
@@ -1247,8 +1325,12 @@ def register():
     bpy.utils.register_class(ComplexMarkOperator)
     bpy.utils.register_class(SelectionDetectionOpterator)
     bpy.utils.register_class(CreatePointCloudObjectOperator)
-    bpy.utils.register_class(LAS_OT_AutoOpenOperator)
     
+    bpy.types.Scene.operator_is_running = bpy.props.BoolProperty(
+        name="Operator Is Running",
+        description="A flag to indicate whether the operator is running",
+        default=False
+    )
     bpy.types.Scene.intensity_threshold = bpy.props.FloatProperty(
         name="Intensity Threshold",
         description="Minimum intensity threshold",
@@ -1267,7 +1349,7 @@ def register():
     bpy.types.Scene.fatline_width = bpy.props.FloatProperty(
         name="Width",
         description="Fat Line Width",
-        default=0.2,
+        default=0.15,
         min=0.01, max=10,  #min and max width
         subtype='NONE'  
         
@@ -1289,6 +1371,12 @@ def register():
         min=0.0, max=1.0,  # Colors range from 0 to 1
         size=4
         
+    )
+    bpy.types.Scene.marking_transparency = bpy.props.FloatProperty(
+        name="Marking Transparency",
+        description="Set the transparency for the marking (0.0 fully transparent, 1.0 fully opaque)",
+        default=0.5,  # Default transparency is 50%
+        min=0.0, max=1.0  # Transparency can range from 0.0 to 1.0
     )
   
     bpy.utils.register_class(FindALlRoadMarkingsOperator)
@@ -1312,6 +1400,7 @@ def unregister():
     bpy.utils.unregister_class(CreatePointCloudObjectOperator)
     bpy.utils.unregister_class(LAS_OT_AutoOpenOperator)
     bpy.utils.unregister_class(FindALlRoadMarkingsOperator)
+    del bpy.types.Scene.marking_transparency
     del bpy.types.Scene.marking_color
     del bpy.types.Scene.intensity_threshold
     del bpy.types.Scene.markings_threshold
