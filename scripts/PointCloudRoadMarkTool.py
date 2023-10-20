@@ -1001,7 +1001,7 @@ def create_combined_dots_shape(coords_list):
 
     #filters out bad points
     distance_between_cords = 0.05
-    required_surrounded_cords= 20
+    required_surrounded_cords= 10
     coords_list = filter_noise_with_dbscan(coords_list, distance_between_cords, required_surrounded_cords)
     
     # Sort the coordinates by distance
