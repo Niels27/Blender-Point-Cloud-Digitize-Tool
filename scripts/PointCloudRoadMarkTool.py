@@ -63,6 +63,8 @@ from functools import partial
 from concurrent.futures import ThreadPoolExecutor
 from joblib import dump, load 
 import json
+import cv2
+from sklearn.cluster import DBSCAN 
 
 #Global variables 
 point_coords = None
@@ -990,11 +992,23 @@ def create_combined_shape(coords_list):
     mesh = bpy.data.meshes.new("Combined Shape")
     obj = bpy.data.objects.new("Combined Shape", mesh)
     bpy.context.collection.objects.link(obj)
+    
+    # Detect the shape from the points
+    shape_type = detect_shape_from_points(coords_list)
 
+    # Create new coordinates for the 'perfect' shape based on the detection
+    if shape_type == "triangle":
+        new_coords_list = create_perfect_triangle(coords_list)
+    elif shape_type == "rectangle":
+        new_coords_list = create_perfect_rectangle(coords_list)
+    # Add more conditions here if you're handling more shapes
+    else:
+        new_coords_list = coords_list  # If no recognizable shape, default to original coordinates
+        
     # Create a bmesh object and add vertices to it, adjusting their Z coordinate
     bm = bmesh.new()
     adjusted_coords_list = []
-    for coords in coords_list:
+    for coords in new_coords_list:
         adjusted_coords = (coords[0], coords[1], coords[2] + 10.0)  # Adjust Z coordinate
         adjusted_coords_list.append(adjusted_coords)
         bm.verts.new(adjusted_coords)
@@ -1035,7 +1049,8 @@ def create_combined_shape(coords_list):
     # After the object is created, store it 
     store_object_state(obj)
     print("rendered road mark shape in: ", time.time()-start_time)
-    
+
+        
 # Define a function to create multiple squares on top of detected points, then combines them into one shape
 def create_combined_dots_shape(coords_list):
     
@@ -1107,12 +1122,118 @@ def create_combined_dots_shape(coords_list):
         obj.data.materials.append(shape_material)
         
     obj.color = marking_color  # Set viewport display color 
-    #print("rendered road mark shape", shape_counter, "in: ", time.time()-start_time)
     shape_counter+=1
     
     # After the object is created, store it 
     store_object_state(obj)
-          
+    
+def detect_shape_from_points(coords_list):
+    
+    coords_list = filter_noise_with_dbscan(coords_list)
+    # Convert the floating points to integers
+    int_coords = np.round(coords_list).astype(int)
+
+    # Strip the Z-coordinate (if present)
+    xy_coords = int_coords[:, :2]  # All rows, only the first two columns (X and Y)
+
+    # Find min and max bounds for the coordinates
+    min_vals = xy_coords.min(axis=0)
+    max_vals = xy_coords.max(axis=0)
+
+    # Create a blank binary image
+    img = np.zeros((max_vals[1] - min_vals[1] + 10, max_vals[0] - min_vals[0] + 10), dtype=np.uint8)
+
+    # Shift points based on min_vals to fit within the image
+    shifted_points = xy_coords - min_vals + 5  
+
+    # Reshape points to the format needed by fillPoly 
+    reshaped_points = shifted_points.reshape((-1, 1, 2))
+
+    # Draw the shape filled (as white) on the image
+    cv2.fillPoly(img, [reshaped_points], 255)
+
+    # Find contours and select the contour with the maximum area 
+    contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contour = max(contours, key=cv2.contourArea)
+
+    # Approximate the contour to a simpler shape
+    epsilon = 0.02 * cv2.arcLength(contour, True)
+    approx = cv2.approxPolyDP(contour, epsilon, True)
+
+    # Based on the number of vertices, determine the shape
+    num_vertices = len(approx)
+    shape = "unknown"
+    if num_vertices == 3:
+        shape = "triangle"
+    elif num_vertices == 4:
+     
+        shape = "rectangle"  # or potentially "square" with further checks
+
+    # Print the detected shape
+    print(f"Detected shape: {shape}")
+
+    return shape
+
+def create_perfect_rectangle(coords):
+    # Find the center of the points
+    coords_np = np.array(coords)
+    center = coords_np.mean(axis=0)
+
+    # Find the width and height based on the furthest points
+    min_vals = coords_np.min(axis=0)
+    max_vals = coords_np.max(axis=0)
+    width = max_vals[0] - min_vals[0]
+    height = max_vals[1] - min_vals[1]
+
+    half_width = width / 2
+    half_height = height / 2
+
+    # Create coordinates for a perfect rectangle
+    rectangle_coords = [
+        (center[0] - half_width, center[1] - half_height, center[2]),  # bottom left
+        (center[0] + half_width, center[1] - half_height, center[2]),  # bottom right
+        (center[0] + half_width, center[1] + half_height, center[2]),  # top right
+        (center[0] - half_width, center[1] + half_height, center[2])   # top left
+    ]
+
+    return rectangle_coords
+
+def create_perfect_triangle(coords):
+    # Find the average of the points 
+    coords_np = np.array(coords)
+    centroid = coords_np.mean(axis=0)
+
+    distances = np.sqrt(np.sum((coords_np - centroid) ** 2, axis=1))
+    avg_distance = np.mean(distances)
+
+    triangle_coords = []
+    for i in range(3):
+        angle = 2 * np.pi / 3 * i  # 120 degrees difference
+        new_point = centroid + np.array([np.cos(angle), np.sin(angle), 0]) * avg_distance
+        triangle_coords.append(new_point.tolist())
+
+    return triangle_coords
+
+def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=20):
+    # DBSCAN clustering
+    db = DBSCAN(eps=eps, min_samples=min_samples).fit(coords_list)
+
+    # Create a mask for the points belonging to clusters (excluding noise labeled as -1)
+    core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
+    core_samples_mask[db.core_sample_indices_] = True
+
+    # Filter the coordinates: keep only those points that are part of a cluster
+    filtered_coords = [coords for coords, is_core in zip(coords_list, core_samples_mask) if is_core]
+
+    # Print the filtering results
+    original_count = len(coords_list)
+    filtered_count = len(filtered_coords)
+    removed_count = original_count - filtered_count
+
+    print(f"Points have been filtered. Original amount: {original_count}, Removed: {removed_count}")
+
+    return filtered_coords
+             
 #Operator to remove all drawn markings from the scene collection
 class RemoveAllMarkingsOperator(bpy.types.Operator):
     bl_idname = "custom.remove_all_markings"
