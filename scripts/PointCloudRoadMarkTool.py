@@ -978,79 +978,7 @@ class SelectionDetectionOpterator(bpy.types.Operator):
         
         # After the object is created, store it 
         store_object_state(obj)
-        
-# Define a function to create a single mesh for combined rectangles
-def create_combined_shape(coords_list):
-    
-    start_time = time.time()
-    marking_color = bpy.context.scene.marking_color 
-    transparency = bpy.context.scene.marking_transparency
-
-    global objects_z_height
-    
-    # Create a new mesh and link it to the scene
-    mesh = bpy.data.meshes.new("Combined Shape")
-    obj = bpy.data.objects.new("Combined Shape", mesh)
-    bpy.context.collection.objects.link(obj)
-    
-    # Detect the shape from the points
-    shape_type = detect_shape_from_points(coords_list)
-
-    # Create new coordinates for the 'perfect' shape based on the detection
-    if shape_type == "triangle":
-        new_coords_list = create_perfect_triangle(coords_list)
-    elif shape_type == "rectangle":
-        new_coords_list = create_perfect_rectangle(coords_list)
-    # Add more conditions here if you're handling more shapes
-    else:
-        new_coords_list = coords_list  # If no recognizable shape, default to original coordinates
-        
-    # Create a bmesh object and add vertices to it, adjusting their Z coordinate
-    bm = bmesh.new()
-    adjusted_coords_list = []
-    for coords in new_coords_list:
-        adjusted_coords = (coords[0], coords[1], coords[2] + 10.0)  # Adjust Z coordinate
-        adjusted_coords_list.append(adjusted_coords)
-        bm.verts.new(adjusted_coords)
-
-    # Create a face from the vertices
-    bmesh.ops.convex_hull(bm, input=bm.verts)
-
-    # Update the mesh with the new data
-    bm.to_mesh(mesh)
-    bm.free()
-
-    # Create a new material for the combined shape
-    shape_material = bpy.data.materials.new(name="shape color")
-    shape_material.diffuse_color = (marking_color[0], marking_color[1], marking_color[2], transparency) 
-
-    # Enable transparency in the material settings
-    shape_material.use_nodes = True
-    shape_material.blend_method = 'BLEND'
-
-    # Find the Principled BSDF node and set its alpha value
-    principled_node = next(n for n in shape_material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
-    principled_node.inputs['Alpha'].default_value = transparency
-    
-    # Assign the material to the object
-    if len(obj.data.materials) > 0:
-        # If the object already has materials, replace the first one with the new material
-        obj.data.materials[0] = shape_material
-    else:
-        # Otherwise, add the new material to the object
-        obj.data.materials.append(shape_material)
-
-    # Adjust the object's Z location based on the lowest Z coordinate in the adjusted list
-    min_z = min(coord[2] for coord in adjusted_coords_list)
-    z_offset = objects_z_height - min_z  # We want the lowest Z to be at 10.0
-    obj.location.z += z_offset
-
-    
-    # After the object is created, store it 
-    store_object_state(obj)
-    print("rendered road mark shape in: ", time.time()-start_time)
-
-        
+             
 # Define a function to create multiple squares on top of detected points, then combines them into one shape
 def create_combined_dots_shape(coords_list):
     
@@ -1071,6 +999,11 @@ def create_combined_dots_shape(coords_list):
     z_offset = objects_z_height  # Offset in Z coordinate
     max_gap = 10  # Maximum gap size to fill
 
+    #filters out bad points
+    distance_between_cords = 0.05
+    required_surrounded_cords= 20
+    coords_list = filter_noise_with_dbscan(coords_list, distance_between_cords, required_surrounded_cords)
+    
     # Sort the coordinates by distance
     coords_list.sort(key=lambda coords: (coords[0]**2 + coords[1]**2 + coords[2]**2)**0.5)
 
@@ -1124,62 +1057,156 @@ def create_combined_dots_shape(coords_list):
     obj.color = marking_color  # Set viewport display color 
     shape_counter+=1
     
-    # After the object is created, store it 
+    #After the object is created, store it 
     store_object_state(obj)
+
+#Define a function to create a single mesh for combined rectangles
+def create_combined_shape(coords_list):
     
-def detect_shape_from_points(coords_list):
+    start_time = time.time()
+    marking_color = bpy.context.scene.marking_color 
+    transparency = bpy.context.scene.marking_transparency
+
+    global objects_z_height
+    
+    # Create a new mesh and link it to the scene
+    mesh = bpy.data.meshes.new("Combined Shape")
+    obj = bpy.data.objects.new("Combined Shape", mesh)
+    bpy.context.collection.objects.link(obj)
+    
+    #Detect the shape from the points
+    shape_type = detect_shape_from_points(coords_list)
+
+    #Create new coordinates for the shape based on the detection
+    if shape_type == "triangle":
+        new_coords_list = create_perfect_triangle(coords_list)
+    elif shape_type == "rectangle":
+        new_coords_list = create_perfect_rectangle(coords_list)
+    
+    else:
+        new_coords_list = coords_list  # If no recognizable shape, default to original coordinates
+        
+    #Create a bmesh object and add vertices to it, adjusting their Z coordinate
+    bm = bmesh.new()
+    adjusted_coords_list = []
+    for coords in new_coords_list:
+        adjusted_coords = (coords[0], coords[1], coords[2] + 10.0)  # Adjust Z coordinate
+        adjusted_coords_list.append(adjusted_coords)
+        bm.verts.new(adjusted_coords)
+
+    #Create a face from the vertices
+    bmesh.ops.convex_hull(bm, input=bm.verts)
+
+    #Update the mesh with the new data
+    bm.to_mesh(mesh)
+    bm.free()
+
+    #Create a new material for the combined shape
+    shape_material = bpy.data.materials.new(name="shape color")
+    shape_material.diffuse_color = (marking_color[0], marking_color[1], marking_color[2], transparency) 
+
+    #Enable transparency in the material settings
+    shape_material.use_nodes = True
+    shape_material.blend_method = 'BLEND'
+
+    #Find the Principled BSDF node and set its alpha value
+    principled_node = next(n for n in shape_material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+    principled_node.inputs['Alpha'].default_value = transparency
+    
+    #Assign the material to the object
+    if len(obj.data.materials) > 0:
+        #If the object already has materials, replace the first one with the new material
+        obj.data.materials[0] = shape_material
+    else:
+        #Otherwise, add the new material to the object
+        obj.data.materials.append(shape_material)
+
+    #Adjust the objects Z location based on the lowest Z coordinate 
+    min_z = min(coord[2] for coord in adjusted_coords_list)
+    z_offset = objects_z_height - min_z  
+    obj.location.z += z_offset
+
+    
+    #After the object is created, store it 
+    store_object_state(obj)
+    print("rendered road mark shape in: ", time.time()-start_time)
+    
+def detect_shape_from_points(coords_list, scale_factor=100):
     
     coords_list = filter_noise_with_dbscan(coords_list)
-    # Convert the floating points to integers
+    #Convert the floating points to integers
     int_coords = np.round(coords_list).astype(int)
 
-    # Strip the Z-coordinate (if present)
-    xy_coords = int_coords[:, :2]  # All rows, only the first two columns (X and Y)
+    #Remove the Z-coordinate 
+    xy_coords = int_coords[:, :2]  
 
-    # Find min and max bounds for the coordinates
-    min_vals = xy_coords.min(axis=0)
-    max_vals = xy_coords.max(axis=0)
+    #Scale the coordinates to increase the shape size
+    scaled_coords = xy_coords * scale_factor
+    
+    #Find min and max bounds for the coordinates for the canvas size
+    min_vals = xy_coords.min(axis=0) * scale_factor  
+    max_vals = xy_coords.max(axis=0) * scale_factor  
+    
+    #Create a binary image
+    img = np.zeros((max_vals[1] - min_vals[1] + scale_factor, max_vals[0] - min_vals[0] + scale_factor), dtype=np.uint8)
 
-    # Create a blank binary image
-    img = np.zeros((max_vals[1] - min_vals[1] + 10, max_vals[0] - min_vals[0] + 10), dtype=np.uint8)
+    #Shift points based on min_vals to fit within the image
+    shifted_points = scaled_coords  - min_vals + 5  
 
-    # Shift points based on min_vals to fit within the image
-    shifted_points = xy_coords - min_vals + 5  
-
-    # Reshape points to the format needed by fillPoly 
+    #Reshape points to the format needed by fillPoly 
     reshaped_points = shifted_points.reshape((-1, 1, 2))
 
-    # Draw the shape filled (as white) on the image
+    #Draw the shape filled (as white) on the image
     cv2.fillPoly(img, [reshaped_points], 255)
 
-    # Find contours and select the contour with the maximum area 
+    #Find contours and select the contour with the maximum area 
     contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contour = max(contours, key=cv2.contourArea)
+    print(len(contours) , "contours found")
+    #Draw all the contours found on an image
+    contour_image = cv2.cvtColor(img.copy(), cv2.COLOR_GRAY2BGR)  # Convert to a 3-channel image 
+    cv2.drawContours(contour_image, contours, -1, (0, 255, 0), 1)  # Draws contours in green 
 
-    # Approximate the contour to a simpler shape
+    display_contour=False
+    save_countor=True
+    
+    if(display_contour):
+        #Display the image with contours
+        cv2.imshow("Contours", contours)
+        cv2.waitKey(0)  
+        cv2.destroyAllWindows()
+        
+    if(save_countor):
+        # Save the image
+        output_path = output_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'contours', 'contours.png')
+        cv2.imwrite(output_path, contour_image)
+        print("contour saved at ",output_path)
+    
+    #Approximate the contour to a simpler shape
     epsilon = 0.02 * cv2.arcLength(contour, True)
     approx = cv2.approxPolyDP(contour, epsilon, True)
 
-    # Based on the number of vertices, determine the shape
+    #Based on the number of vertices, determine the shape
     num_vertices = len(approx)
     shape = "unknown"
     if num_vertices == 3:
         shape = "triangle"
     elif num_vertices == 4:
      
-        shape = "rectangle"  # or potentially "square" with further checks
+        shape = "rectangle"  
 
-    # Print the detected shape
+    #Print the detected shape
     print(f"Detected shape: {shape}")
 
     return shape
 
 def create_perfect_rectangle(coords):
-    # Find the center of the points
+    
+    #Find the center of the points
     coords_np = np.array(coords)
     center = coords_np.mean(axis=0)
 
-    # Find the width and height based on the furthest points
+    #Find the width and height based on the furthest points
     min_vals = coords_np.min(axis=0)
     max_vals = coords_np.max(axis=0)
     width = max_vals[0] - min_vals[0]
@@ -1188,7 +1215,7 @@ def create_perfect_rectangle(coords):
     half_width = width / 2
     half_height = height / 2
 
-    # Create coordinates for a perfect rectangle
+    #Create coordinates for a perfect rectangle
     rectangle_coords = [
         (center[0] - half_width, center[1] - half_height, center[2]),  # bottom left
         (center[0] + half_width, center[1] - half_height, center[2]),  # bottom right
@@ -1199,7 +1226,8 @@ def create_perfect_rectangle(coords):
     return rectangle_coords
 
 def create_perfect_triangle(coords):
-    # Find the average of the points 
+    
+    #Find the average of the points 
     coords_np = np.array(coords)
     centroid = coords_np.mean(axis=0)
 
@@ -1215,17 +1243,18 @@ def create_perfect_triangle(coords):
     return triangle_coords
 
 def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=20):
-    # DBSCAN clustering
+    
+    #DBSCAN clustering
     db = DBSCAN(eps=eps, min_samples=min_samples).fit(coords_list)
 
-    # Create a mask for the points belonging to clusters (excluding noise labeled as -1)
+    #Create a mask for the points belonging to clusters (excluding noise labeled as -1)
     core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
     core_samples_mask[db.core_sample_indices_] = True
 
-    # Filter the coordinates: keep only those points that are part of a cluster
+    #Filter the coordinates: keep only those points that are part of a cluster
     filtered_coords = [coords for coords, is_core in zip(coords_list, core_samples_mask) if is_core]
 
-    # Print the filtering results
+    #Print the filtering results
     original_count = len(coords_list)
     filtered_count = len(filtered_coords)
     removed_count = original_count - filtered_count
