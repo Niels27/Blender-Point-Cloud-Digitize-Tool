@@ -651,7 +651,7 @@ class FastMarkOperator(bpy.types.Operator):
                 
             if rectangle_coords:
                 # Create a single mesh for the combined  rectangles
-                create_combined_shape(rectangle_coords)
+                create_combined_shape(rectangle_coords,shape_type="unkown")
                 
         
         elif event.type == 'ESC':
@@ -981,7 +981,197 @@ class SelectionDetectionOpterator(bpy.types.Operator):
         
         # After the object is created, store it 
         store_object_state(obj)
+        
+class TriangleMarkOperator(bpy.types.Operator):
+    bl_idname = "custom.mark_triangle"
+    bl_label = "Mark Triangle"
+    
+    _is_running = False  # Class variable to check if the operator is already running
+    
+    def modal(self, context, event):
+        global point_coords, point_colors, points_kdtree
+        intensity_threshold = context.scene.intensity_threshold
+        
+        if event.type == 'MOUSEMOVE':  
+            self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
+            
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
+            
+            start_time = time.time()
+            # Get the mouse coordinates
+            x, y = event.mouse_region_x, event.mouse_region_y
+            # Convert 2D mouse coordinates to 3D view coordinates
+            view3d = context.space_data
+            region = context.region
+            region_3d = context.space_data.region_3d
+            location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
+
+            # Get the z coordinate from 3D space
+            z = location.z
+
+            # Do a nearest-neighbor search
+            num_neighbors = 16  # Number of neighbors 
+            radius = 50
+            _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
+        
+            rectangle_coords = []
+            
+            # Get the average intensity of the nearest points
+            average_intensity = get_average_intensity(nearest_indices[0])
+           
+             # Get the average color of the nearest points
+            average_color = get_average_color(nearest_indices[0])
              
+            print("average color: ", average_color,"average intensity: " ,average_intensity)
+            
+            # Check if the average intensity indicates a road marking (white)
+            if average_intensity > intensity_threshold or np.all(average_color > 160):
+                # Region growing algorithm
+                checked_indices = set()
+                indices_to_check = list(nearest_indices[0])
+                print("Region growing started")
+                while indices_to_check:   
+                    current_index = indices_to_check.pop()
+                    if current_index not in checked_indices:
+                        checked_indices.add(current_index)
+                        intensity = np.average(point_colors[current_index]) * 255  # grayscale
+                        if intensity>intensity_threshold:
+                            rectangle_coords.append(point_coords[current_index])
+                            _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
+                            indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
+
+                print("Region growing completed", time.time()-start_time)
+                
+            
+            else:
+                print("no road markings found")
+                
+            if rectangle_coords:
+                # Create a single mesh for the combined  rectangles
+                create_combined_shape(rectangle_coords,shape_type="triangle")
+                
+        
+        elif event.type == 'ESC':
+            FastMarkOperator._is_running = False
+            print("Operation was cancelled")
+            return {'CANCELLED'}  # Stop when ESCAPE is pressed
+
+        return {'PASS_THROUGH'}
+
+    
+    def invoke(self, context, event):
+        if FastMarkOperator._is_running:
+            self.report({'WARNING'}, "Operator is already running")
+            return {'CANCELLED'}  # Do not run the operator if it's already running
+
+        if context.area.type == 'VIEW_3D':
+            FastMarkOperator._is_running = True  # Set the flag to indicate the operator is running
+            context.window_manager.modal_handler_add(self)
+            return {'RUNNING_MODAL'}
+        else:
+            return {'CANCELLED'}
+
+    def cancel(self, context):
+        FastMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
+        print("Operator was properly cancelled")  # Debug message
+        return {'CANCELLED'}
+ 
+
+class RectangleMarkOperator(bpy.types.Operator):
+    bl_idname = "custom.mark_rectangle"
+    bl_label = "Mark Rectangle"
+    
+    _is_running = False  # Class variable to check if the operator is already running
+    
+    def modal(self, context, event):
+        global point_coords, point_colors, points_kdtree
+        intensity_threshold = context.scene.intensity_threshold
+        
+        if event.type == 'MOUSEMOVE':  
+            self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
+            
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
+            
+            start_time = time.time()
+            # Get the mouse coordinates
+            x, y = event.mouse_region_x, event.mouse_region_y
+            # Convert 2D mouse coordinates to 3D view coordinates
+            view3d = context.space_data
+            region = context.region
+            region_3d = context.space_data.region_3d
+            location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
+
+            # Get the z coordinate from 3D space
+            z = location.z
+
+            # Do a nearest-neighbor search
+            num_neighbors = 16  # Number of neighbors 
+            radius = 50
+            _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
+        
+            rectangle_coords = []
+            
+            # Get the average intensity of the nearest points
+            average_intensity = get_average_intensity(nearest_indices[0])
+           
+             # Get the average color of the nearest points
+            average_color = get_average_color(nearest_indices[0])
+             
+            print("average color: ", average_color,"average intensity: " ,average_intensity)
+            
+            # Check if the average intensity indicates a road marking (white)
+            if average_intensity > intensity_threshold or np.all(average_color > 160):
+                # Region growing algorithm
+                checked_indices = set()
+                indices_to_check = list(nearest_indices[0])
+                print("Region growing started")
+                while indices_to_check:   
+                    current_index = indices_to_check.pop()
+                    if current_index not in checked_indices:
+                        checked_indices.add(current_index)
+                        intensity = np.average(point_colors[current_index]) * 255  # grayscale
+                        if intensity>intensity_threshold:
+                            rectangle_coords.append(point_coords[current_index])
+                            _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
+                            indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
+
+                print("Region growing completed", time.time()-start_time)
+                
+            
+            else:
+                print("no road markings found")
+                
+            if rectangle_coords:
+                # Create a single mesh for the combined  rectangles
+                create_combined_shape(rectangle_coords,shape_type="rectangle")
+                
+        
+        elif event.type == 'ESC':
+            FastMarkOperator._is_running = False
+            print("Operation was cancelled")
+            return {'CANCELLED'}  # Stop when ESCAPE is pressed
+
+        return {'PASS_THROUGH'}
+
+    
+    def invoke(self, context, event):
+        if FastMarkOperator._is_running:
+            self.report({'WARNING'}, "Operator is already running")
+            return {'CANCELLED'}  # Do not run the operator if it's already running
+
+        if context.area.type == 'VIEW_3D':
+            FastMarkOperator._is_running = True  # Set the flag to indicate the operator is running
+            context.window_manager.modal_handler_add(self)
+            return {'RUNNING_MODAL'}
+        else:
+            return {'CANCELLED'}
+
+    def cancel(self, context):
+        FastMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
+        print("Operator was properly cancelled")  # Debug message
+        return {'CANCELLED'}
+ 
+                 
 # Define a function to create multiple squares on top of detected points, then combines them into one shape
 def create_combined_dots_shape(coords_list):
     
@@ -1064,7 +1254,7 @@ def create_combined_dots_shape(coords_list):
     store_object_state(obj)
 
 #Define a function to create a single mesh for combined rectangles
-def create_combined_shape(coords_list):
+def create_combined_shape(coords_list,shape_type):
     
     start_time = time.time()
     marking_color = bpy.context.scene.marking_color 
@@ -1095,7 +1285,7 @@ def create_combined_shape(coords_list):
     bm_vertices = [vert.co for vert in bm.verts]
 
     # Detect the shape using the bmesh vertices
-    shape_type = detect_shape_from_points(bm_vertices, from_bmesh=True)
+    #shape_type detect_shape_from_points(bm_vertices, from_bmesh=True)
   
     # Create new coordinates for the shape based on the detection
     if shape_type == "triangle":
@@ -1221,12 +1411,14 @@ def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
     return shape
 
 def create_perfect_rectangle(coords):
-    
-    #Find the center of the points
+    # Find the center of the points
     coords_np = np.array(coords)
     center = coords_np.mean(axis=0)
 
-    #Find the width and height based on the furthest points
+    # Compute the principal component of the coords_list
+    principal_direction = get_principal_component(coords_np[:, :2])  # Only take X and Y for 2D PCA
+
+    # Find the width and height based on the furthest points
     min_vals = coords_np.min(axis=0)
     max_vals = coords_np.max(axis=0)
     width = max_vals[0] - min_vals[0]
@@ -1235,21 +1427,37 @@ def create_perfect_rectangle(coords):
     half_width = width / 2
     half_height = height / 2
 
-    #Create coordinates for a perfect rectangle
-    rectangle_coords = [
-        (center[0] - half_width, center[1] - half_height, center[2]),  # bottom left
-        (center[0] + half_width, center[1] - half_height, center[2]),  # bottom right
-        (center[0] + half_width, center[1] + half_height, center[2]),  # top right
-        (center[0] - half_width, center[1] + half_height, center[2])   # top left
-    ]
+    # Create coordinates for a perfect rectangle
+    rectangle_coords = np.array([
+        [-half_width, -half_height],  # bottom left
+        [half_width, -half_height],  # bottom right
+        [half_width, half_height],  # top right
+        [-half_width, half_height]   # top left
+    ])
 
-    return rectangle_coords
+    # Rotation matrix to align the rectangle with the principal direction
+    theta = np.arctan2(principal_direction[1], principal_direction[0])
+    rotation_matrix = np.array([
+        [np.cos(theta), -np.sin(theta)],
+        [np.sin(theta), np.cos(theta)]
+    ])
+
+    # Apply the rotation to the rectangle coordinates
+    rotated_coords = rectangle_coords.dot(rotation_matrix)
+
+    # Translate to the center and add the Z coordinate
+    final_coords = rotated_coords + center[:2]
+    final_coords = [(x, y, center[2]) for x, y in final_coords]
+
+    return final_coords
 
 def create_perfect_triangle(coords):
-    
-    #Find the average of the points 
+    # Find the average of the points 
     coords_np = np.array(coords)
     centroid = coords_np.mean(axis=0)
+
+    # Compute the principal component of the coords_list
+    principal_direction = get_principal_component(coords_np[:, :2])  # Only take X and Y for 2D PCA
 
     distances = np.sqrt(np.sum((coords_np - centroid) ** 2, axis=1))
     avg_distance = np.mean(distances)
@@ -1257,10 +1465,30 @@ def create_perfect_triangle(coords):
     triangle_coords = []
     for i in range(3):
         angle = 2 * np.pi / 3 * i  # 120 degrees difference
-        new_point = centroid + np.array([np.cos(angle), np.sin(angle), 0]) * avg_distance
-        triangle_coords.append(new_point.tolist())
+        x = np.cos(angle) * avg_distance
+        y = np.sin(angle) * avg_distance
+        triangle_coords.append([x, y])
 
-    return triangle_coords
+    # Rotation matrix to align the triangle with the principal direction
+    # Here, we align the first edge of the triangle to the principal direction.
+    # So, we find the angle between the principal direction and the triangle's first edge.
+    triangle_edge = np.array(triangle_coords[1]) - np.array(triangle_coords[0])
+    cos_theta = np.dot(triangle_edge, principal_direction) / (np.linalg.norm(triangle_edge) * np.linalg.norm(principal_direction))
+    theta = np.arccos(cos_theta)
+    
+    rotation_matrix = np.array([
+        [np.cos(theta), -np.sin(theta)],
+        [np.sin(theta), np.cos(theta)]
+    ])
+
+    # Apply the rotation to the triangle coordinates
+    rotated_coords = np.dot(triangle_coords, rotation_matrix)
+
+    # Translate to the centroid and add the Z coordinate
+    final_coords = rotated_coords + centroid[:2]
+    final_coords = [(x, y, centroid[2]) for x, y in final_coords]
+
+    return final_coords
 
 def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=25):
     
@@ -1282,6 +1510,26 @@ def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=25):
     print(f"Points have been filtered. Original amount: {original_count}, Removed: {removed_count}")
 
     return filtered_coords
+def get_principal_component(points):
+    # Compute the centroid of the points
+    centroid = np.mean(points, axis=0)
+    
+    # Center the data points
+    centered_points = points - centroid
+    
+    # Compute the covariance matrix
+    covariance_matrix = np.cov(centered_points, rowvar=False)
+    
+    # Compute the eigenvalues and eigenvectors
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
+    
+    # Sort the eigenvectors based on the eigenvalues in descending order
+    sorted_indices = np.argsort(eigenvalues)[::-1]
+    
+    # Extract the principal component
+    principal_component = eigenvectors[:, sorted_indices[0]]
+    
+    return principal_component
              
 #Operator to remove all drawn markings from the scene collection
 class RemoveAllMarkingsOperator(bpy.types.Operator):
@@ -1522,6 +1770,10 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         layout.operator("view3d.mark_complex", text="Complex shape marker")
         layout.operator("view3d.selection_detection", text="Selection Marker")
         
+        row = layout.row(align=True)
+        layout.operator("custom.mark_triangle", text="triangle marker")
+        layout.operator("custom.mark_rectangle", text="rectangle marker")
+        
         row = layout.row()
         row.operator("custom.find_all_road_marks", text="Auto Mark")
         row.prop(scene, "markings_threshold")
@@ -1529,9 +1781,11 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row = layout.row()
         row.operator("object.simple_undo", text="Undo")
         row.operator("object.simple_redo", text="Redo")
+        
+        
                
          # Dummy space
-        for _ in range(20):  # you can increase or decrease this number
+        for _ in range(20): 
             layout.label(text="")
             
 # Register the operators and panel
@@ -1551,6 +1805,9 @@ def register():
     
     bpy.utils.register_class(FastMarkOperator)
     bpy.utils.register_class(ComplexMarkOperator)
+    bpy.utils.register_class(TriangleMarkOperator)
+    
+    bpy.utils.register_class(RectangleMarkOperator)
     bpy.utils.register_class(SelectionDetectionOpterator)
     bpy.utils.register_class(CreatePointCloudObjectOperator)
     
@@ -1625,7 +1882,8 @@ def unregister():
     bpy.utils.unregister_class(FastMarkOperator)
     bpy.utils.unregister_class(ComplexMarkOperator)
     bpy.utils.unregister_class(SelectionDetectionOpterator)
-    
+    bpy.utils.unregister_class(TriangleMarkOperator)
+    bpy.utils.unregister_class(RectangleMarkOperator)
     bpy.utils.unregister_class(CreatePointCloudObjectOperator)
     bpy.utils.unregister_class(LAS_OT_AutoOpenOperator)
     bpy.utils.unregister_class(FindALlRoadMarkingsOperator)
