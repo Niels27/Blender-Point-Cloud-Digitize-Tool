@@ -68,7 +68,7 @@ from joblib import dump, load
 import json
 import cv2
 from sklearn.cluster import DBSCAN 
-from scipy.interpolate import UnivariateSpline
+from scipy.interpolate import UnivariateSpline, make_interp_spline,CubicSpline
 
 #Global variables 
 point_coords = None
@@ -1367,6 +1367,7 @@ def create_combined_shape(coords_list, shape_type):
     required_surrounded_cords= 10
     coords_list = filter_noise_with_dbscan(coords_list, distance_between_cords, required_surrounded_cords)
     
+    avg_z = np.mean(np.array(coords_list)[:, 2])
     # Create new coordinates for the shape based on the detection
     if shape_type == "triangle":
         print("drawing triangle")
@@ -1376,10 +1377,8 @@ def create_combined_shape(coords_list, shape_type):
         new_coords_list = create_flexible_rectangle(coords_list)
     elif shape_type == "curved line":
         print("drawing curved line")
-        avg_z = np.mean(np.array(coords_list)[:, 2])
-        new_coords_list = create_curved_line(coords_list)
-        for coords in new_coords_list:
-            bm.verts.new((coords[0], coords[1], avg_z))
+        new_coords_list = create_flexible_rectangle(coords_list)
+        new_coords_list = [(coords[0], coords[1], avg_z) for coords in new_coords_list]
     else:
         new_coords_list = coords_list  # If no recognizable shape, default to original coordinates
 
@@ -1387,8 +1386,6 @@ def create_combined_shape(coords_list, shape_type):
     bm.clear()
     # Update the bmesh with the new coordinates
     for coords in new_coords_list:
-        if len(coords) == 2:  # if the coords are 2D, reintroduce the Z coordinate
-            coords = (coords[0], coords[1], avg_z)
         bm.verts.new(coords)
 
     bmesh.ops.convex_hull(bm, input=bm.verts)
@@ -1542,51 +1539,47 @@ def create_flexible_rectangle(coords):
     west = min(vertices, key=lambda p: p[0])
     return [north, east, south, west]
 
+def interpolate_curve(coords):
+    coords_np = np.array(coords)
+    sorted_coords = coords_np[np.argsort(coords_np[:, 0])]
+    x = sorted_coords[:, 0]
+    y = sorted_coords[:, 1]
+    
+    # Create a smooth curve through the points
+    t = np.linspace(0, 1, len(x))
+    t_new = np.linspace(0, 1, 100)  # Increase this for more resolution
+    spl = make_interp_spline(t, np.c_[x, y], k=3)  # k=3 for cubic spline
+    curve = spl(t_new)
+    
+    return curve
+
 def create_curved_line(coords):
-
-    def unique_average(data):
-        # This function will average y-values for duplicated x-values
-        unique_data = {}
-        for x, y, _ in data:
-            if x in unique_data:
-                unique_data[x].append(y)
-            else:
-                unique_data[x] = [y]
-        averaged_data = np.array([[x, np.mean(y_list)] for x, y_list in sorted(unique_data.items())])
-        print(f"Original Data Shape: {data.shape}")
-        print(f"Averaged Data Shape: {averaged_data.shape}")
-        return averaged_data
-
-    print("Starting function...")
+    coords_np = np.array(coords)
     
-    coords = np.array(coords)
-    print(f"Converted coords to numpy array: {coords.shape}")
+    # Calculate the centroid
+    centroid = np.mean(coords_np, axis=0)
     
-    sorted_coords = coords[np.argsort(coords[:, 0])]
-    print(f"Sorted coords: {sorted_coords.shape}")
+    # Sort points by x for interpolation
+    sorted_points = coords_np[np.argsort(coords_np[:, 0])]
     
-    top_half = sorted_coords[len(sorted_coords)//2:]
-    bottom_half = sorted_coords[:len(sorted_coords)//2]
-    print(f"Top half: {top_half.shape}, Bottom half: {bottom_half.shape}")
+    # Determine the top and bottom points
+    top_points = sorted_points[sorted_points[:, 1] > centroid[1]]
+    bottom_points = sorted_points[sorted_points[:, 1] <= centroid[1]]
     
-    # Average y-values for duplicated x-values
-    print("Averaging top half...")
-    top_half = unique_average(top_half)
+    # Create cubic spline interpolations
+    top_spline = CubicSpline(top_points[:, 0], top_points[:, 1])
+    bottom_spline = CubicSpline(bottom_points[:, 0], bottom_points[:, 1])
     
-    print("Averaging bottom half...")
-    bottom_half = unique_average(bottom_half)
-
-    print("Creating splines...")
-    top_spline = UnivariateSpline(top_half[:, 0], top_half[:, 1], s=0)
-    bottom_spline = UnivariateSpline(bottom_half[:, 0], bottom_half[:, 1], s=0)
-
-    x_vals = np.linspace(sorted_coords[0, 0], sorted_coords[-1, 0], len(sorted_coords))
-    top_edge = np.column_stack((x_vals, top_spline(x_vals)))
-    bottom_edge = np.column_stack((x_vals, bottom_spline(x_vals)))
-
-    flexible_rectangle = np.vstack((top_edge, bottom_edge[::-1]))
-
-    return flexible_rectangle
+    # Sample points from the spline
+    x_vals = np.linspace(np.min(coords_np[:, 0]), np.max(coords_np[:, 0]), len(coords_np))
+    top_y_vals = top_spline(x_vals)
+    bottom_y_vals = bottom_spline(x_vals)
+    
+    # Combine the top and bottom points to get the final shape
+    rectangle_coords = np.column_stack((x_vals, top_y_vals))
+    rectangle_coords = np.vstack((rectangle_coords, np.column_stack((x_vals[::-1], bottom_y_vals[::-1]))))
+    
+    return rectangle_coords.tolist()
 
 def create_fixed_rectangle(coords, width=None, height=None):
     coords_np = np.array(coords)
