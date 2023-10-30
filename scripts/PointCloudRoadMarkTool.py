@@ -68,6 +68,7 @@ from joblib import dump, load
 import json
 import cv2
 from sklearn.cluster import DBSCAN 
+from scipy.interpolate import UnivariateSpline
 
 #Global variables 
 point_coords = None
@@ -1171,7 +1172,100 @@ class RectangleMarkOperator(bpy.types.Operator):
         print("Operator was properly cancelled")  # Debug message
         return {'CANCELLED'}
  
-                 
+class CurvedLineMarkOperator(bpy.types.Operator):
+    bl_idname = "custom.mark_curved_line"
+    bl_label = "Mark curved line"
+    
+    _is_running = False  # Class variable to check if the operator is already running
+    
+    def modal(self, context, event):
+        global point_coords, point_colors, points_kdtree
+        intensity_threshold = context.scene.intensity_threshold
+        
+        if event.type == 'MOUSEMOVE':  
+            self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
+            
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
+            
+            start_time = time.time()
+            # Get the mouse coordinates
+            x, y = event.mouse_region_x, event.mouse_region_y
+            # Convert 2D mouse coordinates to 3D view coordinates
+            view3d = context.space_data
+            region = context.region
+            region_3d = context.space_data.region_3d
+            location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
+
+            # Get the z coordinate from 3D space
+            z = location.z
+
+            # Do a nearest-neighbor search
+            num_neighbors = 16  # Number of neighbors 
+            radius = 50
+            _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
+        
+            rectangle_coords = []
+            
+            # Get the average intensity of the nearest points
+            average_intensity = get_average_intensity(nearest_indices[0])
+           
+             # Get the average color of the nearest points
+            average_color = get_average_color(nearest_indices[0])
+             
+            print("average color: ", average_color,"average intensity: " ,average_intensity)
+            
+            # Check if the average intensity indicates a road marking (white)
+            if average_intensity > intensity_threshold or np.all(average_color > 160):
+                # Region growing algorithm
+                checked_indices = set()
+                indices_to_check = list(nearest_indices[0])
+                print("Region growing started")
+                while indices_to_check:   
+                    current_index = indices_to_check.pop()
+                    if current_index not in checked_indices:
+                        checked_indices.add(current_index)
+                        intensity = np.average(point_colors[current_index]) * 255  # grayscale
+                        if intensity>intensity_threshold:
+                            rectangle_coords.append(point_coords[current_index])
+                            _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
+                            indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
+
+                print("Region growing completed", time.time()-start_time)
+                
+            
+            else:
+                print("no road markings found")
+                
+            if rectangle_coords:
+                # Create a single mesh for the combined  rectangles
+                create_combined_shape(rectangle_coords,shape_type="curved line")
+                
+        
+        elif event.type == 'ESC':
+            FastMarkOperator._is_running = False
+            print("Operation was cancelled")
+            return {'CANCELLED'}  # Stop when ESCAPE is pressed
+
+        return {'PASS_THROUGH'}
+
+    
+    def invoke(self, context, event):
+        if FastMarkOperator._is_running:
+            self.report({'WARNING'}, "Operator is already running")
+            return {'CANCELLED'}  # Do not run the operator if it's already running
+
+        if context.area.type == 'VIEW_3D':
+            FastMarkOperator._is_running = True  # Set the flag to indicate the operator is running
+            context.window_manager.modal_handler_add(self)
+            return {'RUNNING_MODAL'}
+        else:
+            return {'CANCELLED'}
+
+    def cancel(self, context):
+        FastMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
+        print("Operator was properly cancelled")  # Debug message
+        return {'CANCELLED'}
+                  
 # Define a function to create multiple squares on top of detected points, then combines them into one shape
 def create_combined_dots_shape(coords_list):
     
@@ -1254,7 +1348,7 @@ def create_combined_dots_shape(coords_list):
     store_object_state(obj)
 
 #Define a function to create a single mesh for combined rectangles
-def create_combined_shape(coords_list,shape_type):
+def create_combined_shape(coords_list, shape_type):
     
     start_time = time.time()
     marking_color = bpy.context.scene.marking_color 
@@ -1268,37 +1362,35 @@ def create_combined_shape(coords_list,shape_type):
     # Create a bmesh object
     bm = bmesh.new()
 
-    #filters out bad points
+    # Filter out bad points
     distance_between_cords = 0.03
     required_surrounded_cords= 10
     coords_list = filter_noise_with_dbscan(coords_list, distance_between_cords, required_surrounded_cords)
     
-    # Add vertices from coords_list to the bmesh 
-    for coords in coords_list:
-        #adjusted_coords  = (coords[0], coords[1], coords[2])  
-        bm.verts.new(coords )
-
-    # Create the convex hull using these vertices
-    bmesh.ops.convex_hull(bm, input=bm.verts)
-
-    # Extract the vertices from the bmesh for shape detection
-    bm_vertices = [vert.co for vert in bm.verts]
-
-    # Detect the shape using the bmesh vertices
-    #shape_type detect_shape_from_points(bm_vertices, from_bmesh=True)
-  
     # Create new coordinates for the shape based on the detection
     if shape_type == "triangle":
-        new_coords_list = create_perfect_triangle(coords_list, size=0.3)
+        print("drawing triangle")
+        new_coords_list = create_flexible_triangle(coords_list)
     elif shape_type == "rectangle":
-        new_coords_list = create_perfect_rectangle(coords_list, width=1, height=0.1)
+        print("drawing rectangle")
+        new_coords_list = create_flexible_rectangle(coords_list)
+    elif shape_type == "curved line":
+        print("drawing curved line")
+        avg_z = np.mean(np.array(coords_list)[:, 2])
+        new_coords_list = create_curved_line(coords_list)
+        for coords in new_coords_list:
+            bm.verts.new((coords[0], coords[1], avg_z))
     else:
         new_coords_list = coords_list  # If no recognizable shape, default to original coordinates
 
     # Update the bmesh with the new coordinates
     bm.clear()
+    # Update the bmesh with the new coordinates
     for coords in new_coords_list:
+        if len(coords) == 2:  # if the coords are 2D, reintroduce the Z coordinate
+            coords = (coords[0], coords[1], avg_z)
         bm.verts.new(coords)
+
     bmesh.ops.convex_hull(bm, input=bm.verts)
     bm.to_mesh(mesh)
     bm.free()
@@ -1326,6 +1418,7 @@ def create_combined_shape(coords_list,shape_type):
     # After the object is created, store it 
     store_object_state(obj)
     print("rendered road mark shape in: ", time.time()-start_time)
+
 
     
 def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
@@ -1410,7 +1503,92 @@ def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
 
     return shape
 
-def create_perfect_rectangle(coords, width=None, height=None):
+def create_flexible_triangle(coords):
+    # Convert coords to numpy array for efficient operations
+    coords_np = np.array(coords)
+    
+    # Compute the pairwise distances
+    pairwise_distances = np.linalg.norm(coords_np[:, np.newaxis] - coords_np, axis=2)
+    
+    # Find the two points that are the furthest apart
+    max_dist_indices = np.unravel_index(np.argmax(pairwise_distances), pairwise_distances.shape)
+    vertex1 = coords_np[max_dist_indices[0]]
+    vertex2 = coords_np[max_dist_indices[1]]
+    
+    # For each point, compute its distance to the line formed by vertex1 and vertex2
+    line_vector = vertex2 - vertex1
+    line_vector /= np.linalg.norm(line_vector)  # normalize
+    max_distance = 0
+    third_vertex = None
+    for point in coords_np:
+        diff = point - vertex1
+        proj = np.dot(diff, line_vector) * line_vector
+        distance_to_line = np.linalg.norm(diff - proj)
+        if distance_to_line > max_distance:
+            max_distance = distance_to_line
+            third_vertex = point
+
+    return [vertex1.tolist(), vertex2.tolist(), third_vertex.tolist()]
+
+
+
+def create_flexible_rectangle(coords):
+    hull = ConvexHull(coords)
+    vertices = np.array([coords[v] for v in hull.vertices])
+    centroid = np.mean(vertices, axis=0)
+    north = max(vertices, key=lambda p: p[1])
+    south = min(vertices, key=lambda p: p[1])
+    east = max(vertices, key=lambda p: p[0])
+    west = min(vertices, key=lambda p: p[0])
+    return [north, east, south, west]
+
+def create_curved_line(coords):
+
+    def unique_average(data):
+        # This function will average y-values for duplicated x-values
+        unique_data = {}
+        for x, y, _ in data:
+            if x in unique_data:
+                unique_data[x].append(y)
+            else:
+                unique_data[x] = [y]
+        averaged_data = np.array([[x, np.mean(y_list)] for x, y_list in sorted(unique_data.items())])
+        print(f"Original Data Shape: {data.shape}")
+        print(f"Averaged Data Shape: {averaged_data.shape}")
+        return averaged_data
+
+    print("Starting function...")
+    
+    coords = np.array(coords)
+    print(f"Converted coords to numpy array: {coords.shape}")
+    
+    sorted_coords = coords[np.argsort(coords[:, 0])]
+    print(f"Sorted coords: {sorted_coords.shape}")
+    
+    top_half = sorted_coords[len(sorted_coords)//2:]
+    bottom_half = sorted_coords[:len(sorted_coords)//2]
+    print(f"Top half: {top_half.shape}, Bottom half: {bottom_half.shape}")
+    
+    # Average y-values for duplicated x-values
+    print("Averaging top half...")
+    top_half = unique_average(top_half)
+    
+    print("Averaging bottom half...")
+    bottom_half = unique_average(bottom_half)
+
+    print("Creating splines...")
+    top_spline = UnivariateSpline(top_half[:, 0], top_half[:, 1], s=0)
+    bottom_spline = UnivariateSpline(bottom_half[:, 0], bottom_half[:, 1], s=0)
+
+    x_vals = np.linspace(sorted_coords[0, 0], sorted_coords[-1, 0], len(sorted_coords))
+    top_edge = np.column_stack((x_vals, top_spline(x_vals)))
+    bottom_edge = np.column_stack((x_vals, bottom_spline(x_vals)))
+
+    flexible_rectangle = np.vstack((top_edge, bottom_edge[::-1]))
+
+    return flexible_rectangle
+
+def create_fixed_rectangle(coords, width=None, height=None):
     coords_np = np.array(coords)
     centroid = coords_np.mean(axis=0)
     principal_direction = get_principal_component(coords_np[:, :2])
@@ -1443,7 +1621,7 @@ def create_perfect_rectangle(coords, width=None, height=None):
 
     return final_coords
 
-def create_perfect_triangle(coords, size=None):
+def create_fixed_triangle(coords, size=None):
     #Find the average of the points 
     coords_np = np.array(coords)
     centroid = coords_np.mean(axis=0)
@@ -1480,6 +1658,7 @@ def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=25):
     print(f"Points have been filtered. Original amount: {original_count}, Removed: {removed_count}")
 
     return filtered_coords
+
 def get_principal_component(points):
     # Compute the centroid of the points
     centroid = np.mean(points, axis=0)
@@ -1500,6 +1679,7 @@ def get_principal_component(points):
     principal_component = eigenvectors[:, sorted_indices[0]]
     
     return principal_component
+
 def align_shapes(original_coords, perfect_coords):
     # Compute centroids
     original_centroid = np.mean(original_coords, axis=0)
@@ -1757,23 +1937,21 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row.prop(scene, "fatline_width")
  
         row = layout.row(align=True)
-        layout.operator("view3d.mark_fast", text="Simple marker")
-        layout.operator("view3d.mark_complex", text="Complex shape marker")
-        layout.operator("view3d.selection_detection", text="Selection Marker")
-        
-        row = layout.row(align=True)
-        layout.operator("custom.mark_triangle", text="triangle marker")
-        layout.operator("custom.mark_rectangle", text="rectangle marker")
-        
+        layout.operator("view3d.mark_fast", text="Simple fill marker")
+        layout.operator("view3d.mark_complex", text="Complex fill marker")
+        layout.operator("view3d.selection_detection", text="Selection fill Marker")
         row = layout.row()
         row.operator("custom.find_all_road_marks", text="Auto Mark")
         row.prop(scene, "markings_threshold")
         
-        row = layout.row()
+        row = layout.row(align=True)
+        layout.operator("custom.mark_triangle", text="triangle marker")
+        layout.operator("custom.mark_rectangle", text="rectangle marker")
+        layout.operator("custom.mark_curved_line", text="curved line marker")  
+      
         row.operator("object.simple_undo", text="Undo")
         row.operator("object.simple_redo", text="Redo")
-        
-        
+            
                
          # Dummy space
         for _ in range(20): 
@@ -1783,6 +1961,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
 def register():
     bpy.utils.register_class(LAS_OT_OpenOperator)
     bpy.utils.register_class(LAS_OT_AutoOpenOperator)
+    bpy.utils.register_class(CreatePointCloudObjectOperator)
     bpy.utils.register_class(DrawStraightLineOperator)
     bpy.utils.register_class(DrawStraightFatLineOperator)
     bpy.utils.register_class(RemoveAllMarkingsOperator)
@@ -1796,11 +1975,13 @@ def register():
     
     bpy.utils.register_class(FastMarkOperator)
     bpy.utils.register_class(ComplexMarkOperator)
-    bpy.utils.register_class(TriangleMarkOperator)
-    
-    bpy.utils.register_class(RectangleMarkOperator)
     bpy.utils.register_class(SelectionDetectionOpterator)
-    bpy.utils.register_class(CreatePointCloudObjectOperator)
+    
+    bpy.utils.register_class(TriangleMarkOperator) 
+    bpy.utils.register_class(RectangleMarkOperator)
+    bpy.utils.register_class(CurvedLineMarkOperator)
+
+
     
     """bpy.types.Scene.operator_is_running = bpy.props.BoolProperty(
         name="Operator Is Running",
@@ -1864,26 +2045,30 @@ def register():
 def unregister():
     
     bpy.utils.unregister_class(LAS_OT_OpenOperator) 
+    bpy.utils.unregister_class(LAS_OT_AutoOpenOperator)
     bpy.utils.unregister_class(DrawStraightLineOperator)
     bpy.utils.unregister_class(DrawStraightFatLineOperator)
     bpy.utils.unregister_class(RemoveAllMarkingsOperator)
     bpy.utils.unregister_class(DIGITIZE_PT_Panel)
     bpy.utils.unregister_class(RemovePointCloudOperator)
     bpy.utils.unregister_class(GetPointsInfoOperator)
+    
     bpy.utils.unregister_class(FastMarkOperator)
     bpy.utils.unregister_class(ComplexMarkOperator)
     bpy.utils.unregister_class(SelectionDetectionOpterator)
-    bpy.utils.unregister_class(TriangleMarkOperator)
-    bpy.utils.unregister_class(RectangleMarkOperator)
-    bpy.utils.unregister_class(CreatePointCloudObjectOperator)
-    bpy.utils.unregister_class(LAS_OT_AutoOpenOperator)
     bpy.utils.unregister_class(FindALlRoadMarkingsOperator)
+    bpy.utils.unregister_class(TriangleMarkOperator)
+    bpy.utils.unregister_class(RectangleMarkOperator) 
+    bpy.utils.unregister_class(CurvedLineMarkOperator)
+    bpy.utils.unregister_class(CreatePointCloudObjectOperator)
+
     del bpy.types.Scene.marking_transparency
     del bpy.types.Scene.marking_color
     del bpy.types.Scene.intensity_threshold
     del bpy.types.Scene.markings_threshold
     del bpy.types.Scene.fatline_width
     #del bpy.types.Scene.operator_is_running
+    
     bpy.utils.unregister_class(OBJECT_OT_simple_undo)
     bpy.utils.unregister_class(OBJECT_OT_simple_redo)
     
