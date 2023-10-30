@@ -1289,9 +1289,9 @@ def create_combined_shape(coords_list,shape_type):
   
     # Create new coordinates for the shape based on the detection
     if shape_type == "triangle":
-        new_coords_list = create_perfect_triangle(coords_list)
+        new_coords_list = create_perfect_triangle(coords_list, size=0.3)
     elif shape_type == "rectangle":
-        new_coords_list = create_perfect_rectangle(coords_list)
+        new_coords_list = create_perfect_rectangle(coords_list, width=1, height=0.1)
     else:
         new_coords_list = coords_list  # If no recognizable shape, default to original coordinates
 
@@ -1410,54 +1410,43 @@ def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
 
     return shape
 
-def create_perfect_rectangle(coords):
-    # Find the center of the points
+def create_perfect_rectangle(coords, width=None, height=None):
     coords_np = np.array(coords)
-    center = coords_np.mean(axis=0)
+    centroid = coords_np.mean(axis=0)
+    principal_direction = get_principal_component(coords_np[:, :2])
 
-    # Compute the principal component of the coords_list
-    principal_direction = get_principal_component(coords_np[:, :2])  # Only take X and Y for 2D PCA
-
-    # Find the width and height based on the furthest points
-    min_vals = coords_np.min(axis=0)
-    max_vals = coords_np.max(axis=0)
-    width = max_vals[0] - min_vals[0]
-    height = max_vals[1] - min_vals[1]
+    if width is None or height is None:
+        min_vals = coords_np.min(axis=0)
+        max_vals = coords_np.max(axis=0)
+        width = max_vals[0] - min_vals[0] if width is None else width
+        height = max_vals[1] - min_vals[1] if height is None else height
 
     half_width = width / 2
     half_height = height / 2
 
-    # Create coordinates for a perfect rectangle
     rectangle_coords = np.array([
-        [-half_width, -half_height],  # bottom left
-        [half_width, -half_height],  # bottom right
-        [half_width, half_height],  # top right
-        [-half_width, half_height]   # top left
+        [-half_width, -half_height],  
+        [half_width, -half_height],  
+        [half_width, half_height],   
+        [-half_width, half_height]   
     ])
 
-    # Rotation matrix to align the rectangle with the principal direction
     theta = np.arctan2(principal_direction[1], principal_direction[0])
     rotation_matrix = np.array([
         [np.cos(theta), -np.sin(theta)],
         [np.sin(theta), np.cos(theta)]
     ])
 
-    # Apply the rotation to the rectangle coordinates
     rotated_coords = rectangle_coords.dot(rotation_matrix)
-
-    # Translate to the center and add the Z coordinate
-    final_coords = rotated_coords + center[:2]
-    final_coords = [(x, y, center[2]) for x, y in final_coords]
+    final_coords = rotated_coords + centroid[:2]
+    final_coords = [(x, y, centroid[2]) for x, y in final_coords]
 
     return final_coords
 
-def create_perfect_triangle(coords):
-    # Find the average of the points 
+def create_perfect_triangle(coords, size=None):
+    #Find the average of the points 
     coords_np = np.array(coords)
     centroid = coords_np.mean(axis=0)
-
-    # Compute the principal component of the coords_list
-    principal_direction = get_principal_component(coords_np[:, :2])  # Only take X and Y for 2D PCA
 
     distances = np.sqrt(np.sum((coords_np - centroid) ** 2, axis=1))
     avg_distance = np.mean(distances)
@@ -1465,30 +1454,11 @@ def create_perfect_triangle(coords):
     triangle_coords = []
     for i in range(3):
         angle = 2 * np.pi / 3 * i  # 120 degrees difference
-        x = np.cos(angle) * avg_distance
-        y = np.sin(angle) * avg_distance
-        triangle_coords.append([x, y])
-
-    # Rotation matrix to align the triangle with the principal direction
-    # Here, we align the first edge of the triangle to the principal direction.
-    # So, we find the angle between the principal direction and the triangle's first edge.
-    triangle_edge = np.array(triangle_coords[1]) - np.array(triangle_coords[0])
-    cos_theta = np.dot(triangle_edge, principal_direction) / (np.linalg.norm(triangle_edge) * np.linalg.norm(principal_direction))
-    theta = np.arccos(cos_theta)
+        new_point = centroid + np.array([np.cos(angle), np.sin(angle), 0]) * avg_distance
+        triangle_coords.append(new_point.tolist())
     
-    rotation_matrix = np.array([
-        [np.cos(theta), -np.sin(theta)],
-        [np.sin(theta), np.cos(theta)]
-    ])
-
-    # Apply the rotation to the triangle coordinates
-    rotated_coords = np.dot(triangle_coords, rotation_matrix)
-
-    # Translate to the centroid and add the Z coordinate
-    final_coords = rotated_coords + centroid[:2]
-    final_coords = [(x, y, centroid[2]) for x, y in final_coords]
-
-    return final_coords
+    aligned_coords = align_shapes(coords, triangle_coords)
+    return aligned_coords
 
 def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=25):
     
@@ -1530,6 +1500,27 @@ def get_principal_component(points):
     principal_component = eigenvectors[:, sorted_indices[0]]
     
     return principal_component
+def align_shapes(original_coords, perfect_coords):
+    # Compute centroids
+    original_centroid = np.mean(original_coords, axis=0)
+    perfect_centroid = np.mean(perfect_coords, axis=0)
+
+    # Compute vectors from centroids to vertices
+    original_vectors = original_coords - original_centroid
+    perfect_vectors = perfect_coords - perfect_centroid
+
+    # Normalize vectors
+    original_directions = original_vectors / np.linalg.norm(original_vectors, axis=1)[:, None]
+    perfect_directions = perfect_vectors / np.linalg.norm(perfect_vectors, axis=1)[:, None]
+
+    # Match vertices
+    matched_vertices = []
+    for p_dir in perfect_directions:
+        similarities = np.dot(original_directions, p_dir)
+        best_match_idx = np.argmax(similarities)
+        matched_vertices.append(original_coords[best_match_idx])
+
+    return matched_vertices
              
 #Operator to remove all drawn markings from the scene collection
 class RemoveAllMarkingsOperator(bpy.types.Operator):
