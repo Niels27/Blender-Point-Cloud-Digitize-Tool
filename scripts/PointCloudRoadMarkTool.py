@@ -1290,7 +1290,7 @@ class FixedTriangleMarkOperator(bpy.types.Operator):
 
                 # Get the z coordinate from 3d space
                 z = location.z
-                create_fixed_triangle()
+                create_fixed_triangle(context, location, size=0.5)
           
             else:
                 return {'PASS_THROUGH'}
@@ -1331,7 +1331,7 @@ class FixedRectangleMarkOperator(bpy.types.Operator):
 
                 # Get the z coordinate from 3d space
                 z = location.z
-                create_fixed_triangle()
+                create_fixed_square(context, location, size=0.5)
           
             else:
                 return {'PASS_THROUGH'}
@@ -1417,58 +1417,76 @@ def create_curved_line(coords):
     
     return rectangle_coords.tolist()
 
-def create_fixed_rectangle(coords, width=None, height=None):
+
+
+def create_fixed_triangle(context, location, size=1.0):
+    global objects_z_height
+    # Create new mesh and object
+    mesh = bpy.data.meshes.new('FixedTriangle')
+    obj = bpy.data.objects.new('FixedTriangle', mesh)
+
+    # Link object to scene
+    bpy.context.collection.objects.link(obj)
     
-    coords_np = np.array(coords)
-    centroid = coords_np.mean(axis=0)
-    principal_direction = get_principal_component(coords_np[:, :2])
+    # Set object location
+    obj.location = (location.x, location.y, objects_z_height)
 
-    if width is None or height is None:
-        min_vals = coords_np.min(axis=0)
-        max_vals = coords_np.max(axis=0)
-        width = max_vals[0] - min_vals[0] if width is None else width
-        height = max_vals[1] - min_vals[1] if height is None else height
+    # Create mesh data
+    bm = bmesh.new()
 
-    half_width = width / 2
-    half_height = height / 2
+    # Add vertices
+    bm.verts.new((0, 0, 0))  # First vertex at the click location
+    bm.verts.new((size, 0, 0))  # Second vertex size units along the x-axis
+    bm.verts.new((size / 2, size * (3 ** 0.5) / 2, 0))  # Third vertex to form an equilateral triangle
 
-    rectangle_coords = np.array([
-        [-half_width, -half_height],  
-        [half_width, -half_height],  
-        [half_width, half_height],   
-        [-half_width, half_height]   
-    ])
+    # Create a face
+    bm.faces.new(bm.verts)
 
-    theta = np.arctan2(principal_direction[1], principal_direction[0])
-    rotation_matrix = np.array([
-        [np.cos(theta), -np.sin(theta)],
-        [np.sin(theta), np.cos(theta)]
-    ])
+    # Write the bmesh back to the mesh
+    bm.to_mesh(mesh)
+    bm.free()
 
-    rotated_coords = rectangle_coords.dot(rotation_matrix)
-    final_coords = rotated_coords + centroid[:2]
-    final_coords = [(x, y, centroid[2]) for x, y in final_coords]
+    # Add a material to the object
+    mat = bpy.data.materials.new(name="TriangleMaterial")
+    mat.diffuse_color = (1, 0, 0, 1)  # Red color with full opacity
+    obj.data.materials.append(mat)   
+             
+def create_fixed_square(context, location, size=1.0):
+    # Create new mesh and object
+    mesh = bpy.data.meshes.new('FixedSquare')
+    obj = bpy.data.objects.new('FixedSquare', mesh)
 
-    return final_coords
-
-def create_fixed_triangle(coords, size=None):
-    #Find the average of the points 
-    coords_np = np.array(coords)
-    centroid = coords_np.mean(axis=0)
-
-    distances = np.sqrt(np.sum((coords_np - centroid) ** 2, axis=1))
-    avg_distance = np.mean(distances)
-
-    triangle_coords = []
-    for i in range(3):
-        angle = 2 * np.pi / 3 * i  # 120 degrees difference
-        new_point = centroid + np.array([np.cos(angle), np.sin(angle), 0]) * avg_distance
-        triangle_coords.append(new_point.tolist())
+    # Link object to scene
+    bpy.context.collection.objects.link(obj)
     
-    aligned_coords = align_shapes(coords, triangle_coords)
-    return aligned_coords
-                                
+    # Set object location
+    obj.location = location
 
+    # Create mesh data
+    bm = bmesh.new()
+
+    # Add vertices for a square
+    half_size = size / 2
+    v1 = bm.verts.new((half_size, half_size, 0))  # Top Right
+    v2 = bm.verts.new((-half_size, half_size, 0))  # Top Left
+    v3 = bm.verts.new((-half_size, -half_size, 0))  # Bottom Left
+    v4 = bm.verts.new((half_size, -half_size, 0))  # Bottom Right
+
+    # Ensure lookup table is updated before we access vertices by index
+    bm.verts.ensure_lookup_table()
+
+    # Create a face
+    bm.faces.new((v1, v2, v3, v4))
+
+    # Write the bmesh back to the mesh
+    bm.to_mesh(mesh)
+    bm.free()
+
+    # Add a material to the object
+    mat = bpy.data.materials.new(name="SquareMaterial")
+    mat.diffuse_color = (1, 0, 0, 1)  # Red color with full opacity
+    obj.data.materials.append(mat)
+    
 def create_curved_rectangle(top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom):
     #  3D coordinates for all points
     top_left = np.array(top_left)
@@ -1561,7 +1579,7 @@ def create_shape(coords_list, shape_type):
     bottom_left, bottom_right, lowest_bottom,
     divisions=50  #curve smoothness
 )
-        view_dots=False
+        view_dots=True
         if(view_dots):
             for top_coord in top_dotted_line:
                 mark_point(top_coord) 
@@ -2824,3 +2842,54 @@ def create_mesh_object_from_lines(top_line, bottom_line, z_height, color, transp
     mesh_obj.data.materials.append(shape_material)
     
     return mesh_obj
+
+def create_fixed_rectangle_old(coords, width=None, height=None):
+    
+    coords_np = np.array(coords)
+    centroid = coords_np.mean(axis=0)
+    principal_direction = get_principal_component(coords_np[:, :2])
+
+    if width is None or height is None:
+        min_vals = coords_np.min(axis=0)
+        max_vals = coords_np.max(axis=0)
+        width = max_vals[0] - min_vals[0] if width is None else width
+        height = max_vals[1] - min_vals[1] if height is None else height
+
+    half_width = width / 2
+    half_height = height / 2
+
+    rectangle_coords = np.array([
+        [-half_width, -half_height],  
+        [half_width, -half_height],  
+        [half_width, half_height],   
+        [-half_width, half_height]   
+    ])
+
+    theta = np.arctan2(principal_direction[1], principal_direction[0])
+    rotation_matrix = np.array([
+        [np.cos(theta), -np.sin(theta)],
+        [np.sin(theta), np.cos(theta)]
+    ])
+
+    rotated_coords = rectangle_coords.dot(rotation_matrix)
+    final_coords = rotated_coords + centroid[:2]
+    final_coords = [(x, y, centroid[2]) for x, y in final_coords]
+
+    return final_coords
+
+def create_fixed_triangle_old(coords, size=None):
+    #Find the average of the points 
+    coords_np = np.array(coords)
+    centroid = coords_np.mean(axis=0)
+
+    distances = np.sqrt(np.sum((coords_np - centroid) ** 2, axis=1))
+    avg_distance = np.mean(distances)
+
+    triangle_coords = []
+    for i in range(3):
+        angle = 2 * np.pi / 3 * i  # 120 degrees difference
+        new_point = centroid + np.array([np.cos(angle), np.sin(angle), 0]) * avg_distance
+        triangle_coords.append(new_point.tolist())
+    
+    aligned_coords = align_shapes(coords, triangle_coords)
+    return aligned_coords
