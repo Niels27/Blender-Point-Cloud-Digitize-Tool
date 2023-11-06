@@ -1094,12 +1094,82 @@ class RectangleMarkOperator(bpy.types.Operator):
         SimpleMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  # Debug message
         return {'CANCELLED'}
- 
+    
 class CurvedLineMarkOperator(bpy.types.Operator):
     bl_idname = "custom.mark_curved_line"
     bl_label = "Mark curved line"
-    
     _is_running = False  # Class variable to check if the operator is already running
+    _start_point = None  # Store the start point of the line
+    _end_point = None  # Store the end point of the line
+    _points_list = []  # Store the list of points defining the line
+    
+    def modal(self, context, event):
+        global point_coords, point_colors, points_kdtree
+        intensity_threshold = context.scene.intensity_threshold
+        
+        if event.type == 'MOUSEMOVE':  
+            self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
+            
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS' and self.mouse_inside_view3d:
+            # Get the mouse coordinates
+            x, y = event.mouse_region_x, event.mouse_region_y
+            # Convert 2D mouse coordinates to 3D view coordinates
+            location = self.get_3d_location(context, (x, y))
+
+            # Do a nearest-neighbor search to check if the click is on a "white" object
+            if is_click_on_white(self, context, location):
+                # If it's the first click, set the start point
+                if self._start_point is None:
+                    self._start_point = location
+                    print("Start point set at:", self._start_point)
+                # If it's the second click, set the end point and draw the line
+                elif self._end_point is None:
+                    self._end_point = location
+                    print("End point set at:", self._end_point)
+                    create_shape(_points_list,shape_type="curved line")
+                # If subsequent clicks, extend the line
+                else:
+                    self._start_point = self._end_point
+                    self._end_point = location
+                    print("Extending line to:", self._end_point)
+                    create_shape(_points_list,shape_type="curved line")
+            else:
+                self.report({'WARNING'}, "Click was not on a 'white' object.")
+        
+        elif event.type == 'ESC':
+            CurvedLineMarkOperator._is_running = False
+            print("Operation was cancelled")
+            return {'CANCELLED'}
+
+        return {'PASS_THROUGH'}
+
+    def invoke(self, context, event):
+        if CurvedLineMarkOperator._is_running:
+            self.report({'WARNING'}, "Operator is already running")
+            return {'CANCELLED'}
+
+        if context.area.type == 'VIEW_3D':
+            CurvedLineMarkOperator._is_running = True
+            context.window_manager.modal_handler_add(self)
+            return {'RUNNING_MODAL'}
+        else:
+            return {'CANCELLED'}
+    _is_running = False  # Class variable to check if the operator is already running
+    
+    def get_3d_location(self, context, mouse_coords):
+        region = context.region
+        region_3d = context.space_data.region_3d
+        return region_2d_to_location_3d(region, region_3d, mouse_coords, (0, 0, 0))
+    
+    def cancel(self, context):
+        CurvedLineMarkOperator._is_running = False
+        print("Operator was properly cancelled")
+        return {'CANCELLED'}
+    
+class AutoCurvedLineOperator(bpy.types.Operator):
+    bl_idname = "custom.auto_curved_line"
+    bl_label = "Mark curved line" 
+
     
     def modal(self, context, event):
         global point_coords, point_colors, points_kdtree
@@ -1448,6 +1518,82 @@ def calculate_curved_line(top_left, top_right, highest_top, bottom_left, bottom_
     draw_polyline_from_points(arc_points_top, "TopArc", color=(1, 0, 0))  
     draw_polyline_from_points(arc_points_bottom, "BottomArc", color=(0, 1, 0))  
     #return curved_rectangle_points
+    
+def create_fixed_length_segments(points, segment_length=1.0):
+    # This function generates points on a polyline with fixed segment lengths
+    extended_points = [Vector(points[0])]  # Start with the first point
+    total_distance = 0  # Keep track of the total distance
+    segment_count = 0  # Count the number of full segments
+
+    for i in range(1, len(points)):
+        start_point = Vector(points[i - 1])
+        end_point = Vector(points[i])
+        segment_vector = end_point - start_point
+        segment_distance = segment_vector.length
+        total_distance += segment_distance
+
+        # Normalize the segment vector
+        segment_vector.normalize()
+
+        # Generate points at fixed intervals between start and end
+        while segment_distance > segment_length:
+            new_point = start_point + segment_vector * segment_length
+            extended_points.append(new_point)
+            start_point = new_point
+            segment_distance -= segment_length
+            segment_count += 1
+
+        # Add the last point if it doesn't fit a full segment
+        if segment_distance > 0:
+            extended_points.append(end_point)
+
+    # Adjust the last segment if it's not a full segment
+    if total_distance % segment_length != 0:
+        extended_points[-1] = extended_points[-2] + segment_vector * (total_distance % segment_length)
+
+    return extended_points, total_distance, segment_count + 1  # Include the last partial segment
+
+def find_middle_points(top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right):
+  
+    # Calculate the middle point between top_left and bottom_left
+    middle_left = [(top_left[i] + bottom_left[i]) / 2 for i in range(len(top_left))]
+    # Calculate the middle point between highest_top and lowest_bottom
+    middle_curve = [(highest_top[i] + lowest_bottom[i]) / 2 for i in range(len(highest_top))]
+    # Calculate the middle point between top_right and bottom_right
+    middle_right = [(top_right[i] + bottom_right[i]) / 2 for i in range(len(top_right))]
+    
+    mark_point(middle_left,"middle_left")
+    mark_point(middle_curve,"middle_curve")
+    mark_point(middle_right,"middle_right")
+    return middle_left, middle_curve, middle_right
+
+def create_polyline(name, points, width=0.1, color=(1, 0, 0, 1)):
+    # Create a new curve data object
+    curve_data = bpy.data.curves.new(name, type='CURVE')
+    curve_data.dimensions = '3D'
+
+    # Create a new spline in the curve
+    polyline = curve_data.splines.new('POLY')
+    polyline.points.add(len(points) - 1)  # The new spline has no points by default, add them
+
+    # Assign the points to the spline
+    for i, point in enumerate(points):
+        polyline.points[i].co = (*point, 1)
+
+    # Create a new object with the curve
+    curve_obj = bpy.data.objects.new(name, curve_data)
+    bpy.context.collection.objects.link(curve_obj)
+
+    # Set up the curve bevel for width
+    curve_data.bevel_depth = width
+    curve_data.bevel_resolution = 0
+
+    # Create a new material with the given color
+    mat = bpy.data.materials.new(name + "_Mat")
+    mat.diffuse_color = color
+    curve_obj.data.materials.append(mat)
+
+    return curve_obj
 
 #Define a function to create a single mesh for combined rectangles
 def create_shape(coords_list, shape_type):
@@ -1471,9 +1617,13 @@ def create_shape(coords_list, shape_type):
             marking_color, transparency)
     elif shape_type == "curved line":
         print("Drawing curved line")
-        # Extract the extreme points and marking functions
-        top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom = find_extreme_points(coords_list)
-        obj=create_curved_line(top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom )
+        top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right = find_extreme_points(coords_list)      
+        middle_points = find_middle_points(top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right)
+        fixed_length_points, total_length, segments = create_fixed_length_segments(middle_points)
+        print(f"Total line length: {total_length:.2f} meters")
+        print(f"Segmented lines drawn: {segments}")
+
+        obj=create_polyline("CurvedLine", fixed_length_points, width=0.1, color=(marking_color[0], marking_color[1], marking_color[2], transparency))
         
     store_object_state(obj)
     print(f"Rendered {shape_type} shape in: {time.time() - start_time:.2f} seconds")
@@ -1926,7 +2076,8 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
        
         layout.operator("custom.mark_triangle", text="triangle marker")
         layout.operator("custom.mark_rectangle", text="rectangle marker")
-        layout.operator("custom.mark_curved_line", text="curved line marker")  
+        layout.operator("custom.mark_curved_line", text="curved line marker") 
+        layout.operator("custom.auto_curved_line", text="auto curved line")  
         row = layout.row(align=True)
         row.operator("object.simple_undo", text="Undo")
         row.operator("object.simple_redo", text="Redo")
@@ -1960,7 +2111,9 @@ def register():
     bpy.utils.register_class(FixedRectangleMarkOperator)
     bpy.utils.register_class(TriangleMarkOperator) 
     bpy.utils.register_class(RectangleMarkOperator)
+    bpy.utils.register_class(AutoCurvedLineOperator)
     bpy.utils.register_class(CurvedLineMarkOperator)
+    
 
 
     
@@ -2043,6 +2196,7 @@ def unregister():
     bpy.utils.unregister_class(FixedRectangleMarkOperator) 
     bpy.utils.unregister_class(TriangleMarkOperator)
     bpy.utils.unregister_class(RectangleMarkOperator) 
+    bpy.utils.unregister_class(AutoCurvedLineOperator)
     bpy.utils.unregister_class(CurvedLineMarkOperator)
     bpy.utils.unregister_class(CreatePointCloudObjectOperator)
 
@@ -2281,15 +2435,19 @@ def find_extreme_points(coords_list):
     bottom_half = coords_np[~top_mask]
 
     #  find the extreme points using all 3D coordinates
-    top_left = top_half[np.argmin(top_half[:, 0])]
-    top_right = top_half[np.argmax(top_half[:, 0])]
-    highest_top = top_half[np.argmax(top_half[:, 1])]
+    bottom_right = top_half[np.argmin(top_half[:, 0])]
+    highest_top= top_half[np.argmax(top_half[:, 0])]
+    top_right= top_half[np.argmax(top_half[:, 1])]
     
-    bottom_left = bottom_half[np.argmin(bottom_half[:, 0])]
-    bottom_right = bottom_half[np.argmax(bottom_half[:, 0])]
-    lowest_bottom = bottom_half[np.argmin(bottom_half[:, 1])]
-
-    return top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom
+    lowest_bottom= bottom_half[np.argmin(bottom_half[:, 0])]
+    top_left= bottom_half[np.argmax(bottom_half[:, 0])]
+    bottom_left= bottom_half[np.argmin(bottom_half[:, 1])]
+    
+    extreme_points=top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right
+    extreme_point_names="top_left", "bottom_left", "highest_top", "lowest_bottom", "top_right", "bottom_right"
+    for i, point in enumerate(extreme_points):
+        mark_point(point, extreme_point_names[i])
+    return top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right
 
 
 # Ensure that the lines are not parallel by adding a small value to the denominator
@@ -2844,3 +3002,24 @@ def create_fixed_triangle_old(coords, size=None):
     
     aligned_coords = align_shapes(coords, triangle_coords)
     return aligned_coords
+
+def is_click_on_white(self, context, location):
+    global points_kdtree, point_colors       
+    intensity_threshold = context.scene.intensity_threshold
+
+    # Define the number of nearest neighbors to search for
+    num_neighbors = 10
+
+    # Use the k-d tree to find the nearest points to the click location
+    _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
+
+    # Calculate the average intensity of the nearest points
+    intensities = [np.average(point_colors[idx]) * 255 for idx in nearest_indices[0]]
+    average_intensity = np.mean(intensities)
+
+    # If the average intensity is above the threshold, return True (click is on a "white" object)
+    if average_intensity > intensity_threshold:
+        return True
+    else:
+        print("Intensity threshold not met")
+        return False
