@@ -284,84 +284,7 @@ class CreatePointCloudObjectOperator(bpy.types.Operator):
         return {'FINISHED'}
     
 
-#Defines an Operator for drawing a free straight line in the viewport using mouseclicks
-class DrawStraightLineOperator(bpy.types.Operator):
-    bl_idname = "custom.draw_straight_line"
-    bl_label = "Draw Straight Line"
-    
-    prev_end_point = None
 
-    def modal(self, context, event):
-        if event.type == 'LEFTMOUSE':
-            if event.value == 'RELEASE':
-                self.draw_line(context, event)
-                return {'RUNNING_MODAL'}
-        elif event.type == 'RIGHTMOUSE' or event.type == 'ESC':
-            return {'CANCELLED'}
-
-        return {'PASS_THROUGH'}
-
-    def invoke(self, context, event):
-        self.prev_end_point = None
-        context.window_manager.modal_handler_add(self)
-        return {'RUNNING_MODAL'}
-
-    def draw_line(self, context, event):
-        view3d = context.space_data
-        region = context.region
-        region_3d = view3d.region_3d
-        marking_color = context.scene.marking_color  
-        global objects_z_height
-       
-        # Convert the 2D mouse position to a 3D coordinate
-        if self.prev_end_point:
-            coord_3d_start = self.prev_end_point
-        else:
-            coord_3d_start = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-            coord_3d_start.z = objects_z_height  # Set the Z coordinate
-
-        coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-        coord_3d_end.z = objects_z_height  # Set the Z coordinate
-
-        # Create a new mesh object for the line
-        mesh = bpy.data.meshes.new(name="Line Mesh")
-        obj = bpy.data.objects.new("Line Object", mesh)
-
-        # Link it to scene
-        bpy.context.collection.objects.link(obj)
-        
-        # Create mesh from python data
-        bm = bmesh.new()
-
-        # Add vertices
-        bm.verts.new(coord_3d_start)
-        bm.verts.new(coord_3d_end)
-
-        # Add an edge between the vertices
-        bm.edges.new(bm.verts)
-
-        # Update and free bmesh for memory performance
-        bm.to_mesh(mesh)
-        bm.free()
-
-        # Create a material for the line and set its color
-        material = bpy.data.materials.new(name="Line Material")
-        material.diffuse_color = marking_color  # make sure this color is set accordingly
-        obj.data.materials.append(material)
-
-        self.prev_end_point = coord_3d_end
-        
-        
-        # After the object is created, store it 
-        store_object_state(obj)
-        
-    def cancel(self, context):
-        if context.object:
-            bpy.ops.object.select_all(action='DESELECT')
-            context.view_layer.objects.active = context.object
-            context.object.select_set(True)
-            bpy.ops.object.delete()
-            
 
 #Defines an Operator for drawing a free thick straight line in the viewport using mouseclicks
 class DrawStraightFatLineOperator(bpy.types.Operator):
@@ -586,7 +509,7 @@ def get_average_color(indices):
     return average_color
 
 #Draws simple shapes to mark road markings     
-class FastMarkOperator(bpy.types.Operator):
+class SimpleMarkOperator(bpy.types.Operator):
     bl_idname = "view3d.mark_fast"
     bl_label = "Mark Road Markings fast"
 
@@ -656,7 +579,7 @@ class FastMarkOperator(bpy.types.Operator):
                 
         
         elif event.type == 'ESC':
-            FastMarkOperator._is_running = False
+            SimpleMarkOperator._is_running = False
             print("Operation was cancelled")
             return {'CANCELLED'}  # Stop when ESCAPE is pressed
 
@@ -664,19 +587,19 @@ class FastMarkOperator(bpy.types.Operator):
 
     
     def invoke(self, context, event):
-        if FastMarkOperator._is_running:
+        if SimpleMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
             return {'CANCELLED'}  # Do not run the operator if it's already running
 
         if context.area.type == 'VIEW_3D':
-            FastMarkOperator._is_running = True  # Set the flag to indicate the operator is running
+            SimpleMarkOperator._is_running = True  # Set the flag to indicate the operator is running
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
 
     def cancel(self, context):
-        FastMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
+        SimpleMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  # Debug message
         return {'CANCELLED'}
         
@@ -1053,7 +976,7 @@ class TriangleMarkOperator(bpy.types.Operator):
                 
         
         elif event.type == 'ESC':
-            FastMarkOperator._is_running = False
+            SimpleMarkOperator._is_running = False
             print("Operation was cancelled")
             return {'CANCELLED'}  # Stop when ESCAPE is pressed
 
@@ -1061,19 +984,19 @@ class TriangleMarkOperator(bpy.types.Operator):
 
     
     def invoke(self, context, event):
-        if FastMarkOperator._is_running:
+        if SimpleMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
             return {'CANCELLED'}  # Do not run the operator if it's already running
 
         if context.area.type == 'VIEW_3D':
-            FastMarkOperator._is_running = True  # Set the flag to indicate the operator is running
+            SimpleMarkOperator._is_running = True  # Set the flag to indicate the operator is running
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
 
     def cancel(self, context):
-        FastMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
+        SimpleMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  # Debug message
         return {'CANCELLED'}
  
@@ -1148,7 +1071,7 @@ class RectangleMarkOperator(bpy.types.Operator):
                 
         
         elif event.type == 'ESC':
-            FastMarkOperator._is_running = False
+            SimpleMarkOperator._is_running = False
             print("Operation was cancelled")
             return {'CANCELLED'}  # Stop when ESCAPE is pressed
 
@@ -1156,19 +1079,19 @@ class RectangleMarkOperator(bpy.types.Operator):
 
     
     def invoke(self, context, event):
-        if FastMarkOperator._is_running:
+        if SimpleMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
             return {'CANCELLED'}  # Do not run the operator if it's already running
 
         if context.area.type == 'VIEW_3D':
-            FastMarkOperator._is_running = True  # Set the flag to indicate the operator is running
+            SimpleMarkOperator._is_running = True  # Set the flag to indicate the operator is running
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
 
     def cancel(self, context):
-        FastMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
+        SimpleMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  # Debug message
         return {'CANCELLED'}
  
@@ -1242,7 +1165,7 @@ class CurvedLineMarkOperator(bpy.types.Operator):
                 
         
         elif event.type == 'ESC':
-            FastMarkOperator._is_running = False
+            SimpleMarkOperator._is_running = False
             print("Operation was cancelled")
             return {'CANCELLED'}  # Stop when ESCAPE is pressed
 
@@ -1250,19 +1173,19 @@ class CurvedLineMarkOperator(bpy.types.Operator):
 
     
     def invoke(self, context, event):
-        if FastMarkOperator._is_running:
+        if SimpleMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
             return {'CANCELLED'}  # Do not run the operator if it's already running
 
         if context.area.type == 'VIEW_3D':
-            FastMarkOperator._is_running = True  # Set the flag to indicate the operator is running
+            SimpleMarkOperator._is_running = True  # Set the flag to indicate the operator is running
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
 
     def cancel(self, context):
-        FastMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
+        SimpleMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  # Debug message
         return {'CANCELLED'}
 
@@ -1487,7 +1410,7 @@ def create_fixed_square(context, location, size=1.0):
     mat.diffuse_color = (1, 0, 0, 1)  # Red color with full opacity
     obj.data.materials.append(mat)
     
-def create_curved_rectangle(top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom):
+def calculate_curved_line(top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom):
     #  3D coordinates for all points
     top_left = np.array(top_left)
     top_right = np.array(top_right)
@@ -1519,120 +1442,71 @@ def create_curved_rectangle(top_left, top_right, highest_top, bottom_left, botto
     # Ensure the order of points forms a continuous loop; this may require additional points along the corners
     curved_rectangle_points = arc_points_top + [top_right.tolist(), bottom_right.tolist()] + arc_points_bottom[::-1] + [bottom_left.tolist(), top_left.tolist()]
 
-
-    draw_polyline_from_points(arc_points_top, "TopArc", color=(1, 0, 0))  # Red for top arc
-
-    return curved_rectangle_points
+    for point in curved_rectangle_points:
+        mark_point(point)
+        
+    draw_polyline_from_points(arc_points_top, "TopArc", color=(1, 0, 0))  
+    draw_polyline_from_points(arc_points_bottom, "BottomArc", color=(0, 1, 0))  
+    #return curved_rectangle_points
 
 #Define a function to create a single mesh for combined rectangles
 def create_shape(coords_list, shape_type):
     
-    global objects_z_height
     start_time = time.time()
     marking_color = bpy.context.scene.marking_color 
     transparency = bpy.context.scene.marking_transparency
-    new_coords_list=None
-    # Create a new mesh and link it to the scene
-    mesh = bpy.data.meshes.new("Combined Shape")
-    obj = bpy.data.objects.new("Combined Shape", mesh)
-    bpy.context.collection.objects.link(obj)
-    
-    # Create a bmesh object
-    bm = bmesh.new()
 
-    # Filter out bad points
-    distance_between_cords = 0.03
-    required_surrounded_cords= 10
-    coords_list = filter_noise_with_dbscan(coords_list, distance_between_cords, required_surrounded_cords)
-    
-    avg_z = np.mean(np.array(coords_list)[:, 2])
-    # Create new coordinates for the shape based on the detection
+    shape_coords = None  # Default to original coordinates
     if shape_type == "triangle":
-        print("drawing triangle")
-        new_coords_list = create_flexible_triangle(coords_list)
+        print("Drawing triangle")
+        shape_coords = create_flexible_triangle(coords_list)
+        obj=create_mesh_with_material(
+            "triangle Shape", shape_coords,
+            marking_color, transparency)
     elif shape_type == "rectangle":
-        print("drawing rectangle")
-        new_coords_list = create_flexible_rectangle(coords_list)
+        print("Drawing rectangle")
+        shape_coords = create_flexible_rectangle(coords_list)
+        obj=create_mesh_with_material(
+            "rectangle Shape", shape_coords,
+            marking_color, transparency)
     elif shape_type == "curved line":
-        print("drawing curved line")
-        
+        print("Drawing curved line")
+        # Extract the extreme points and marking functions
         top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom = find_extreme_points(coords_list)
+        obj=create_curved_line(top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom )
         
-        mark_point(top_left, "top_left")
-        mark_point(top_right, "top_right")
-        mark_point(highest_top, "highest_top")
-        mark_point(bottom_left, "bottom_left")
-        mark_point(bottom_right, "bottom_right")
-        mark_point(lowest_bottom, "lowest_bottom")
-        
-        #new_coords_list = create_curved_rectangle(top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom)
-        #draw_curved_line_shape(top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom)
-       
-        #curved_rectangle_obj = draw_curved_rectangle(top_left, highest_top, top_right, bottom_left, lowest_bottom, bottom_right)  
-        
-        #new_coords_list = create_dotted_curved_line(top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom)
-        #for coord in new_coords_list:
-            #mark_point(coord)
-            
-        top_dotted_line, bottom_dotted_line = create_dotted_curved_lines(
-    top_left, top_right, highest_top,
-    bottom_left, bottom_right, lowest_bottom,
-    divisions=50  #curve smoothness
-)
-        view_dots=True
-        if(view_dots):
-            for top_coord in top_dotted_line:
-                mark_point(top_coord) 
-            for bottom_coord in bottom_dotted_line:
-                mark_point(bottom_coord) 
-                
-        #new_coords_list=top_dotted_line+bottom_dotted_line
-        
-        curved_shape_obj = create_mesh_object_from_lines(
-        top_dotted_line,
-        bottom_dotted_line,
-        objects_z_height,
-        (marking_color[0], marking_color[1], marking_color[2]),  #rgb
-        transparency)
+    store_object_state(obj)
+    print(f"Rendered {shape_type} shape in: {time.time() - start_time:.2f} seconds")
 
-    else:
-        new_coords_list = coords_list  # If no recognizable shape, default to original coordinates
+   
+def create_mesh_with_material(obj_name, shape_coords, marking_color, transparency):
+    
+    global objects_z_height
+    shape_coords = [(x, y, z + objects_z_height) for x, y, z in shape_coords]
         
-    if new_coords_list:
-        # Update the bmesh with the new coordinates
-        bm.clear()
-        # Update the bmesh with the new coordinates
-        for coords in new_coords_list:
-            coords[2]+=objects_z_height
-            bm.verts.new(coords)
+    mesh = bpy.data.meshes.new(obj_name + "_mesh")
+    obj = bpy.data.objects.new(obj_name, mesh)
+    bpy.context.collection.objects.link(obj)
 
-        bmesh.ops.convex_hull(bm, input=bm.verts)
-        bm.to_mesh(mesh)
-        bm.free()
+    bm = bmesh.new()
+    for coords in shape_coords:
+        bm.verts.new(coords)
+    bmesh.ops.convex_hull(bm, input=bm.verts)
+    bm.to_mesh(mesh)
+    bm.free()
 
-        # Create a new material for the combined shape
-        shape_material = bpy.data.materials.new(name="shape color")
-        shape_material.diffuse_color = (marking_color[0], marking_color[1], marking_color[2], transparency) 
+    # Create a new material for the object
+    mat = bpy.data.materials.new(name=obj_name + "_material")
+    mat.diffuse_color = (marking_color[0], marking_color[1], marking_color[2], transparency)
+    mat.use_nodes = True
+    mat.blend_method = 'BLEND'
 
-        # Enable transparency in the material settings
-        shape_material.use_nodes = True
-        shape_material.blend_method = 'BLEND'
+    principled_node = next(n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
+    principled_node.inputs['Alpha'].default_value = transparency
 
-        # Find the Principled BSDF node and set its alpha value
-        principled_node = next(n for n in shape_material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
-        principled_node.inputs['Alpha'].default_value = transparency
-        
-        # Assign the material to the object
-        if len(obj.data.materials) > 0:
-            # If the object already has materials, replace the first one with the new material
-            obj.data.materials[0] = shape_material
-        else:
-            # Otherwise, add the new material to the object
-            obj.data.materials.append(shape_material)
-        
-        # After the object is created, store it 
-        store_object_state(obj)
-        print("rendered", shape_type," shape in: ", time.time()-start_time)
+    obj.data.materials.append(mat)
+
+    return obj
 
 # Define a function to create multiple squares on top of detected points, then combines them into one shape
 def create_dots_shape(coords_list):
@@ -2067,7 +1941,7 @@ def register():
     bpy.utils.register_class(LAS_OT_OpenOperator)
     bpy.utils.register_class(LAS_OT_AutoOpenOperator)
     bpy.utils.register_class(CreatePointCloudObjectOperator)
-    bpy.utils.register_class(DrawStraightLineOperator)
+   # bpy.utils.register_class(DrawStraightLineOperator)
     bpy.utils.register_class(DrawStraightFatLineOperator)
     bpy.utils.register_class(RemoveAllMarkingsOperator)
     bpy.utils.register_class(DIGITIZE_PT_Panel)
@@ -2078,7 +1952,7 @@ def register():
     bpy.utils.register_class(RemovePointCloudOperator)
     bpy.utils.register_class(GetPointsInfoOperator)
     
-    bpy.utils.register_class(FastMarkOperator)
+    bpy.utils.register_class(SimpleMarkOperator)
     bpy.utils.register_class(ComplexMarkOperator)
     bpy.utils.register_class(SelectionDetectionOpterator)
         
@@ -2153,14 +2027,14 @@ def unregister():
     
     bpy.utils.unregister_class(LAS_OT_OpenOperator) 
     bpy.utils.unregister_class(LAS_OT_AutoOpenOperator)
-    bpy.utils.unregister_class(DrawStraightLineOperator)
+   # bpy.utils.unregister_class(DrawStraightLineOperator)
     bpy.utils.unregister_class(DrawStraightFatLineOperator)
     bpy.utils.unregister_class(RemoveAllMarkingsOperator)
     bpy.utils.unregister_class(DIGITIZE_PT_Panel)
     bpy.utils.unregister_class(RemovePointCloudOperator)
     bpy.utils.unregister_class(GetPointsInfoOperator)
     
-    bpy.utils.unregister_class(FastMarkOperator)
+    bpy.utils.unregister_class(SimpleMarkOperator)
     bpy.utils.unregister_class(ComplexMarkOperator)
     bpy.utils.unregister_class(SelectionDetectionOpterator)
     bpy.utils.unregister_class(FindALlRoadMarkingsOperator)
@@ -2242,7 +2116,84 @@ def is_mouse_in_3d_view(context, event):
 
     return False  # Default to False if checks fail.        
         
-                
+#Defines an Operator for drawing a free straight line in the viewport using mouseclicks
+class DrawStraightLineOperator(bpy.types.Operator):
+    bl_idname = "custom.draw_straight_line"
+    bl_label = "Draw Straight Line"
+    
+    prev_end_point = None
+
+    def modal(self, context, event):
+        if event.type == 'LEFTMOUSE':
+            if event.value == 'RELEASE':
+                self.draw_line(context, event)
+                return {'RUNNING_MODAL'}
+        elif event.type == 'RIGHTMOUSE' or event.type == 'ESC':
+            return {'CANCELLED'}
+
+        return {'PASS_THROUGH'}
+
+    def invoke(self, context, event):
+        self.prev_end_point = None
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def draw_line(self, context, event):
+        view3d = context.space_data
+        region = context.region
+        region_3d = view3d.region_3d
+        marking_color = context.scene.marking_color  
+        global objects_z_height
+       
+        # Convert the 2D mouse position to a 3D coordinate
+        if self.prev_end_point:
+            coord_3d_start = self.prev_end_point
+        else:
+            coord_3d_start = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
+            coord_3d_start.z = objects_z_height  # Set the Z coordinate
+
+        coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
+        coord_3d_end.z = objects_z_height  # Set the Z coordinate
+
+        # Create a new mesh object for the line
+        mesh = bpy.data.meshes.new(name="Line Mesh")
+        obj = bpy.data.objects.new("Line Object", mesh)
+
+        # Link it to scene
+        bpy.context.collection.objects.link(obj)
+        
+        # Create mesh from python data
+        bm = bmesh.new()
+
+        # Add vertices
+        bm.verts.new(coord_3d_start)
+        bm.verts.new(coord_3d_end)
+
+        # Add an edge between the vertices
+        bm.edges.new(bm.verts)
+
+        # Update and free bmesh for memory performance
+        bm.to_mesh(mesh)
+        bm.free()
+
+        # Create a material for the line and set its color
+        material = bpy.data.materials.new(name="Line Material")
+        material.diffuse_color = marking_color  # make sure this color is set accordingly
+        obj.data.materials.append(material)
+
+        self.prev_end_point = coord_3d_end
+        
+        
+        # After the object is created, store it 
+        store_object_state(obj)
+        
+    def cancel(self, context):
+        if context.object:
+            bpy.ops.object.select_all(action='DESELECT')
+            context.view_layer.objects.active = context.object
+            context.object.select_set(True)
+            bpy.ops.object.delete()
+                            
         
 def draw_polyline_from_points(points, name, color=(0.8, 0.3, 0.3), thickness=0.02):
     # Create a new curve and a new object using that curve
