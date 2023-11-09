@@ -283,9 +283,6 @@ class CreatePointCloudObjectOperator(bpy.types.Operator):
         print("--- %s seconds ---" % (time.time() - start_time))
         return {'FINISHED'}
     
-
-
-
 #Defines an Operator for drawing a free thick straight line in the viewport using mouseclicks
 class DrawStraightFatLineOperator(bpy.types.Operator):
     
@@ -370,6 +367,7 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
             context.view_layer.objects.active = context.object
             context.object.select_set(True)
             bpy.ops.object.delete()    
+
 
 #Function to create a colored, resizable line object on top of the line      
 def create_rectangle_object(start, end, width):
@@ -475,7 +473,9 @@ class GetPointsInfoOperator(bpy.types.Operator):
                 average_color = np.mean(nearest_colors, axis=0)
                 average_color*=255
                 
-                print("clicked on x,y,z: ",x,y,z,"Average Color:", average_color,"Average intensity: ",average_intensity)
+                clicked_on_white = "Clicked on roadmark" if is_click_on_white(self, context, location) else "No roadmark detected"
+                    
+                print("clicked on x,y,z: ",x,y,z,"Average Color:", average_color,"Average intensity: ",average_intensity,clicked_on_white)
             else:
                 return {'PASS_THROUGH'}
             
@@ -492,12 +492,23 @@ class GetPointsInfoOperator(bpy.types.Operator):
             return {'CANCELLED'}
 
 def get_average_intensity(indices):
+    # If indices is a NumPy array with more than one dimension, flatten it
+    if isinstance(indices, np.ndarray) and indices.ndim > 1:
+        indices = indices.flatten()
+
+    # If indices is a scalar, convert it to a list with a single element
+    if np.isscalar(indices):
+        indices = [indices]
+
     total_intensity = 0.0
-    point_amount= len(indices)
+    point_amount = len(indices)
     for index in indices:
-        intensity = np.average(point_colors[index]) * 255  # grayscale
+        
+        intensity = np.average(point_colors[index]) * 255  
         total_intensity += intensity
+
     return total_intensity / point_amount
+
 
 def get_average_color(indices):
     point_amount=len(indices)
@@ -1098,73 +1109,203 @@ class RectangleMarkOperator(bpy.types.Operator):
 class CurvedLineMarkOperator(bpy.types.Operator):
     bl_idname = "custom.mark_curved_line"
     bl_label = "Mark curved line"
-    _is_running = False  # Class variable to check if the operator is already running
-    _start_point = None  # Store the start point of the line
-    _end_point = None  # Store the end point of the line
-    _points_list = []  # Store the list of points defining the line
+    
+    prev_end_point = None
+    _is_running = False  
     
     def modal(self, context, event):
-        global point_coords, point_colors, points_kdtree
-        intensity_threshold = context.scene.intensity_threshold
         
-        if event.type == 'MOUSEMOVE':  
-            self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
-            
-        if event.type == 'LEFTMOUSE' and event.value == 'PRESS' and self.mouse_inside_view3d:
-            # Get the mouse coordinates
-            x, y = event.mouse_region_x, event.mouse_region_y
-            # Convert 2D mouse coordinates to 3D view coordinates
-            location = self.get_3d_location(context, (x, y))
 
-            # Do a nearest-neighbor search to check if the click is on a "white" object
-            if is_click_on_white(self, context, location):
-                # If it's the first click, set the start point
-                if self._start_point is None:
-                    self._start_point = location
-                    print("Start point set at:", self._start_point)
-                # If it's the second click, set the end point and draw the line
-                elif self._end_point is None:
-                    self._end_point = location
-                    print("End point set at:", self._end_point)
-                    create_shape(_points_list,shape_type="curved line")
-                # If subsequent clicks, extend the line
-                else:
-                    self._start_point = self._end_point
-                    self._end_point = location
-                    print("Extending line to:", self._end_point)
-                    create_shape(_points_list,shape_type="curved line")
-            else:
-                self.report({'WARNING'}, "Click was not on a 'white' object.")
-        
-        elif event.type == 'ESC':
-            CurvedLineMarkOperator._is_running = False
-            print("Operation was cancelled")
+        if event.type == 'LEFTMOUSE' and is_mouse_in_3d_view(context, event):
+            if event.value == 'RELEASE':
+                draw_line(self, context, event)
+                return {'RUNNING_MODAL'}
+        elif event.type == 'RIGHTMOUSE' or event.type == 'ESC':
             return {'CANCELLED'}
 
         return {'PASS_THROUGH'}
 
     def invoke(self, context, event):
+
         if CurvedLineMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
             return {'CANCELLED'}
-
+        else:
+            self.prev_end_point = None
+            context.window_manager.modal_handler_add(self)
+            return {'RUNNING_MODAL'}
+        
         if context.area.type == 'VIEW_3D':
             CurvedLineMarkOperator._is_running = True
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
-    _is_running = False  # Class variable to check if the operator is already running
-    
-    def get_3d_location(self, context, mouse_coords):
-        region = context.region
-        region_3d = context.space_data.region_3d
-        return region_2d_to_location_3d(region, region_3d, mouse_coords, (0, 0, 0))
-    
+
+ 
     def cancel(self, context):
+        
+        '''if context.object:
+            bpy.ops.object.select_all(action='DESELECT')
+            context.view_layer.objects.active = context.object
+            context.object.select_set(True)
+            bpy.ops.object.delete() '''   
+            
         CurvedLineMarkOperator._is_running = False
         print("Operator was properly cancelled")
         return {'CANCELLED'}
+
+    
+def draw_line(self, context, event):
+
+    if not hasattr(self, 'click_counter'):
+        self.click_counter = 0
+
+    marking_color = context.scene.marking_color
+    width = context.scene.fatline_width
+    intensity_threshold = context.scene.intensity_threshold
+    
+    view3d = context.space_data
+    region = context.region
+    region_3d = context.space_data.region_3d
+ 
+    
+    # Convert the mouse position to a 3D location for the end point of the line
+    coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
+    #coord_3d_end.z += objects_z_height  # Add to the z dimension to prevent clipping
+
+    # Check if the current click is on a white road mark
+    on_white_end = is_click_on_white(self, context, coord_3d_end)
+    self.click_counter += 1
+    print(f"Mouseclick {self.click_counter} is {'on' if on_white_end else 'not on'} a white road mark.")
+
+    if self.prev_end_point:
+        # Use the previous end point as the start point for the new line segment
+        coord_3d_start = self.prev_end_point
+
+        # Check if the previous click was on a white road mark
+        on_white_start = is_click_on_white(self, context, coord_3d_start)
+
+        # Determine and print the outcome
+        if on_white_start and on_white_end:
+            print(f"Mouseclick {self.click_counter - 1} and Mouseclick {self.click_counter}are both on a white road mark.")     
+            coord_3d_start, coord_3d_end = snap_line_to_road_mark(self,coord_3d_start, coord_3d_end, intensity_threshold)
+            
+        elif on_white_start:
+            print(f"Mouseclick {self.click_counter - 1} is on a white road mark,Mouseclick {self.click_counter} is not.")
+        elif on_white_end:
+            print(f"Mouseclick {self.click_counter - 1} is not on a white road mark, Mouseclick {self.click_counter} is on.")
+        else:
+            print(f"Neither Mouseclick {self.click_counter - 1} nor Mouseclick {self.click_counter} are on a white road mark.")
+           
+        # Create a new mesh object for the line
+        mesh = bpy.data.meshes.new(name="Line Mesh")
+        obj = bpy.data.objects.new("Line Object", mesh)
+        
+        # After the object is created, store it 
+        store_object_state(obj)
+        
+        # Link it to scene
+        bpy.context.collection.objects.link(obj)
+        
+        # Create mesh from python data
+        bm = bmesh.new()
+
+        # Add vertices
+        bmesh.ops.create_vert(bm, co=coord_3d_start)
+        bmesh.ops.create_vert(bm, co=coord_3d_end)
+
+        # Add an edge between the vertices
+        new_edge = bm.edges.new(bm.verts[-2:])  # Create edge with the last two vertices
+
+        # Update and free bmesh to avoid memory leaks
+        bm.to_mesh(mesh)
+        bm.free()
+
+        # Create a material for the line and set its color
+        material = bpy.data.materials.new(name="Line Material")
+        material.diffuse_color = marking_color
+        obj.data.materials.append(material)
+
+        # Create a rectangle object on top of the line
+        create_rectangle_object(coord_3d_start, coord_3d_end, width)
+
+    # Update the previous end point to be the current one for the next click
+    self.prev_end_point = coord_3d_end
+    
+
+def snap_line_to_road_mark(self, start, end, intensity_threshold):
+    # Calculate direction vector and perpendicular vector
+    direction = (end - start).normalized()
+    perp_direction = direction.cross(Vector((0, 0, 1))).normalized()
+    global point_coords, point_colors, points_kdtree
+
+
+    # Function to find the edge of the road mark
+    def find_edge(start, direction, step_size=0.001, search_radius=0.1, num_points=10, threshold=intensity_threshold*0.7):
+        point = start
+        intensities = []
+        
+        while True:
+            # Collect intensities at this point
+            intensity = get_intensity_at_point(point, search_radius, num_points)
+            intensities.append(intensity)
+            print(f"Checking point {point}: intensity = {intensity}")  # Debug log
+            # If we have enough points, check if we're still on the road mark
+            if len(intensities) >= num_points:
+                avg_intensity = np.mean(intensities[-num_points:])
+                print(f"Average intensity over last {num_points} points: {avg_intensity}")
+                if avg_intensity < threshold:
+                    print(f"Edge found at {point}") 
+                    return point  # Found the edge of the road mark
+            # Step perpendicular to the line direction
+            point += direction * step_size
+
+    def get_intensity_at_point(location, search_radius, k):
+        # Query the k nearest points ignoring the Z coordinate
+        # Create a 2D version of the location by dropping the Z coordinate
+        location_2d = (location[0], location[1])
+
+        # Adjust the query to work with 2D points by dropping the Z coordinate
+        distances, nearest_indices = points_kdtree.query([location_2d], k=k)
+        distances = distances[0]  # distances will be returned as a 2D array, we want the inner array
+        nearest_indices = nearest_indices[0]  # same with nearest_indices
+
+        # Filter out the indices that are within the search radius
+        valid_indices = nearest_indices[distances < search_radius]
+
+        # If no valid points found within search radius, return 0 or other sentinel value
+        if len(valid_indices) == 0:
+            print("No points found within search radius.")
+            return 0
+
+        # Calculate the average intensity for the valid points
+        return get_average_intensity(valid_indices)
+
+    
+
+    # Find edges on both sides of each point
+    left_edge_start = find_edge(start, -perp_direction)
+    right_edge_start = find_edge(start, perp_direction)
+    left_edge_end = find_edge(end, -perp_direction)
+    right_edge_end = find_edge(end, perp_direction)
+
+    # Calculate midpoints
+    mid_start = (left_edge_start + right_edge_start) * 0.5
+    mid_end = (left_edge_end + right_edge_end) * 0.5
+    
+    mark_point(left_edge_start,"left_edge_start",0.02)
+    mark_point(right_edge_start,"right_edge_start",0.02)
+    mark_point(left_edge_end,"left_edge_end",0.02)
+    mark_point(right_edge_end,"right_edge_end",0.02)
+    
+    mark_point(mid_start,"mid_start",0.02)
+    mark_point(mid_end,"mid_end",0.02)
+    
+    # Return the new start and end points for the snapped line
+    return mid_start, mid_end
+
+
     
 class AutoCurvedLineOperator(bpy.types.Operator):
     bl_idname = "custom.auto_curved_line"
@@ -1480,44 +1621,7 @@ def create_fixed_square(context, location, size=1.0):
     mat.diffuse_color = (1, 0, 0, 1)  # Red color with full opacity
     obj.data.materials.append(mat)
     
-def calculate_curved_line(top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom):
-    #  3D coordinates for all points
-    top_left = np.array(top_left)
-    top_right = np.array(top_right)
-    highest_top = np.array(highest_top)
-    bottom_left = np.array(bottom_left)
-    bottom_right = np.array(bottom_right)
-    lowest_bottom = np.array(lowest_bottom)
-    
-    # Find circumcenters and radii for the top and bottom arcs
-    circumcenter_top, radius_top = find_circle_through_3_points(top_left, highest_top, top_right)
-    circumcenter_bottom, radius_bottom = find_circle_through_3_points(bottom_left, lowest_bottom, bottom_right)
-    
-    # Get the Z-coordinates for the top and bottom arcs
-    z_coord_top = highest_top[2]  # Z-coordinate for the top arc
-    z_coord_bottom = lowest_bottom[2]  # Z-coordinate for the bottom arc
-    
-    # Calculate angles for the arc endpoints
-    angle_start_top = np.arctan2(top_left[1] - circumcenter_top[1], top_left[0] - circumcenter_top[0])
-    angle_end_top = np.arctan2(top_right[1] - circumcenter_top[1], top_right[0] - circumcenter_top[0])
-    angle_start_bottom = np.arctan2(bottom_left[1] - circumcenter_bottom[1], bottom_left[0] - circumcenter_bottom[0])
-    angle_end_bottom = np.arctan2(bottom_right[1] - circumcenter_bottom[1], bottom_right[0] - circumcenter_bottom[0])
-    
-    # Create arc points for the top and bottom edges
-    num_points = 20  # Adjust the number of points as needed for smoothness
-    arc_points_top = create_arc_points(circumcenter_top, radius_top, angle_start_top, angle_end_top, num_points, z_coord_top)
-    arc_points_bottom = create_arc_points(circumcenter_bottom, radius_bottom, angle_start_bottom, angle_end_bottom, num_points, z_coord_bottom)
-    
-    # Combine points to create the curved rectangle
-    # Ensure the order of points forms a continuous loop; this may require additional points along the corners
-    curved_rectangle_points = arc_points_top + [top_right.tolist(), bottom_right.tolist()] + arc_points_bottom[::-1] + [bottom_left.tolist(), top_left.tolist()]
 
-    for point in curved_rectangle_points:
-        mark_point(point)
-        
-    draw_polyline_from_points(arc_points_top, "TopArc", color=(1, 0, 0))  
-    draw_polyline_from_points(arc_points_bottom, "BottomArc", color=(0, 1, 0))  
-    #return curved_rectangle_points
     
 def create_fixed_length_segments(points, segment_length=1.0):
     # This function generates points on a polyline with fixed segment lengths
@@ -1567,7 +1671,7 @@ def find_middle_points(top_left, bottom_left, highest_top, lowest_bottom, top_ri
     mark_point(middle_right,"middle_right")
     return middle_left, middle_curve, middle_right
 
-def create_polyline(name, points, width=0.1, color=(1, 0, 0, 1)):
+def create_polyline(name, points, width=0.01, color=(1, 0, 0, 1)):
     # Create a new curve data object
     curve_data = bpy.data.curves.new(name, type='CURVE')
     curve_data.dimensions = '3D'
@@ -1601,7 +1705,8 @@ def create_shape(coords_list, shape_type):
     start_time = time.time()
     marking_color = bpy.context.scene.marking_color 
     transparency = bpy.context.scene.marking_transparency
-
+    line_width = context.scene.fatline_width
+    
     shape_coords = None  # Default to original coordinates
     if shape_type == "triangle":
         print("Drawing triangle")
@@ -1623,7 +1728,7 @@ def create_shape(coords_list, shape_type):
         print(f"Total line length: {total_length:.2f} meters")
         print(f"Segmented lines drawn: {segments}")
 
-        obj=create_polyline("CurvedLine", fixed_length_points, width=0.1, color=(marking_color[0], marking_color[1], marking_color[2], transparency))
+        obj=create_polyline("CurvedLine", fixed_length_points, width=line_width, color=(marking_color[0], marking_color[1], marking_color[2], transparency))
         
     store_object_state(obj)
     print(f"Rendered {shape_type} shape in: {time.time() - start_time:.2f} seconds")
@@ -3003,19 +3108,99 @@ def create_fixed_triangle_old(coords, size=None):
     aligned_coords = align_shapes(coords, triangle_coords)
     return aligned_coords
 
+def calculate_curved_line(top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom):
+    #  3D coordinates for all points
+    top_left = np.array(top_left)
+    top_right = np.array(top_right)
+    highest_top = np.array(highest_top)
+    bottom_left = np.array(bottom_left)
+    bottom_right = np.array(bottom_right)
+    lowest_bottom = np.array(lowest_bottom)
+    
+    # Find circumcenters and radii for the top and bottom arcs
+    circumcenter_top, radius_top = find_circle_through_3_points(top_left, highest_top, top_right)
+    circumcenter_bottom, radius_bottom = find_circle_through_3_points(bottom_left, lowest_bottom, bottom_right)
+    
+    # Get the Z-coordinates for the top and bottom arcs
+    z_coord_top = highest_top[2]  # Z-coordinate for the top arc
+    z_coord_bottom = lowest_bottom[2]  # Z-coordinate for the bottom arc
+    
+    # Calculate angles for the arc endpoints
+    angle_start_top = np.arctan2(top_left[1] - circumcenter_top[1], top_left[0] - circumcenter_top[0])
+    angle_end_top = np.arctan2(top_right[1] - circumcenter_top[1], top_right[0] - circumcenter_top[0])
+    angle_start_bottom = np.arctan2(bottom_left[1] - circumcenter_bottom[1], bottom_left[0] - circumcenter_bottom[0])
+    angle_end_bottom = np.arctan2(bottom_right[1] - circumcenter_bottom[1], bottom_right[0] - circumcenter_bottom[0])
+    
+    # Create arc points for the top and bottom edges
+    num_points = 20  # Adjust the number of points as needed for smoothness
+    arc_points_top = create_arc_points(circumcenter_top, radius_top, angle_start_top, angle_end_top, num_points, z_coord_top)
+    arc_points_bottom = create_arc_points(circumcenter_bottom, radius_bottom, angle_start_bottom, angle_end_bottom, num_points, z_coord_bottom)
+    
+    # Combine points to create the curved rectangle
+    # Ensure the order of points forms a continuous loop; this may require additional points along the corners
+    curved_rectangle_points = arc_points_top + [top_right.tolist(), bottom_right.tolist()] + arc_points_bottom[::-1] + [bottom_left.tolist(), top_left.tolist()]
+
+    for point in curved_rectangle_points:
+        mark_point(point)
+        
+    draw_polyline_from_points(arc_points_top, "TopArc", color=(1, 0, 0))  
+    draw_polyline_from_points(arc_points_bottom, "BottomArc", color=(0, 1, 0))  
+    #return curved_rectangle_points
+
+
+def visualize_search_radius(location, search_radius, name="SearchRadius"):
+    # Check if the mesh already exists. If it does, remove it.
+    if name in bpy.data.objects:
+        bpy.data.objects.remove(bpy.data.objects[name], do_unlink=True)
+
+    # Create a new mesh and a new object
+    mesh = bpy.data.meshes.new(name + "Mesh")
+    obj = bpy.data.objects.new(name, mesh)
+
+    # Link the object to the scene
+    bpy.context.collection.objects.link(obj)
+
+    # Set the object's location to the target location
+    obj.location = location
+
+    # Create a sphere to represent the search radius
+    bpy.ops.object.select_all(action='DESELECT')  # Deselect all objects
+    bpy.context.view_layer.objects.active = obj   # Make the new object the active object
+    obj.select_set(True)                          # Select the new object
+
+    # Enter edit mode to create the sphere
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.primitive_uv_sphere_add(radius=search_radius, location=location)
+    bpy.ops.object.mode_set(mode='OBJECT')  # Exit edit mode
+
+    # We can also make the sphere transparent to not occlude the view
+    mat = bpy.data.materials.new(name="SearchRadiusMaterial")
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    nodes["Principled BSDF"].inputs["Alpha"].default_value = 0.3  # Set transparency to 70%
+    obj.data.materials.append(mat)
+    obj.show_transparent = True
+
+    # Finally, update the scene
+    bpy.context.view_layer.update()
+
+    return obj
+
+
+    
 def is_click_on_white(self, context, location):
-    global points_kdtree, point_colors       
+    global points_kdtree, point_colors
     intensity_threshold = context.scene.intensity_threshold
 
     # Define the number of nearest neighbors to search for
     num_neighbors = 10
-
+    
     # Use the k-d tree to find the nearest points to the click location
     _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
+    
+    average_intensity=get_average_intensity(nearest_indices)
 
-    # Calculate the average intensity of the nearest points
-    intensities = [np.average(point_colors[idx]) * 255 for idx in nearest_indices[0]]
-    average_intensity = np.mean(intensities)
+    print(average_intensity)
 
     # If the average intensity is above the threshold, return True (click is on a "white" object)
     if average_intensity > intensity_threshold:
@@ -3023,3 +3208,5 @@ def is_click_on_white(self, context, location):
     else:
         print("Intensity threshold not met")
         return False
+
+
