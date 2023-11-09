@@ -1189,7 +1189,7 @@ def draw_line(self, context, event):
         # Determine and print the outcome
         if on_white_start and on_white_end:
             print(f"Mouseclick {self.click_counter - 1} and Mouseclick {self.click_counter}are both on a white road mark.")     
-            coord_3d_start, coord_3d_end = snap_line_to_road_mark(self,coord_3d_start, coord_3d_end, intensity_threshold)
+            coord_3d_end = snap_to_road_mark(self, context, coord_3d_end)
             
         elif on_white_start:
             print(f"Mouseclick {self.click_counter - 1} is on a white road mark,Mouseclick {self.click_counter} is not.")
@@ -1226,7 +1226,7 @@ def draw_line(self, context, event):
         material = bpy.data.materials.new(name="Line Material")
         material.diffuse_color = marking_color
         obj.data.materials.append(material)
-
+ 
         # Create a rectangle object on top of the line
         create_rectangle_object(coord_3d_start, coord_3d_end, width)
 
@@ -1234,77 +1234,58 @@ def draw_line(self, context, event):
     self.prev_end_point = coord_3d_end
     
 
-def snap_line_to_road_mark(self, start, end, intensity_threshold):
-    # Calculate direction vector and perpendicular vector
-    direction = (end - start).normalized()
-    perp_direction = direction.cross(Vector((0, 0, 1))).normalized()
+def snap_to_road_mark(self, context, last_click_point):
+    intensity_threshold = context.scene.intensity_threshold
+    region_radius = 10
     global point_coords, point_colors, points_kdtree
-
-
-    # Function to find the edge of the road mark
-    def find_edge(start, direction, step_size=0.001, search_radius=0.1, num_points=10, threshold=intensity_threshold*0.7):
-        point = start
-        intensities = []
-        
-        while True:
-            # Collect intensities at this point
-            intensity = get_intensity_at_point(point, search_radius, num_points)
-            intensities.append(intensity)
-            print(f"Checking point {point}: intensity = {intensity}")  # Debug log
-            # If we have enough points, check if we're still on the road mark
-            if len(intensities) >= num_points:
-                avg_intensity = np.mean(intensities[-num_points:])
-                print(f"Average intensity over last {num_points} points: {avg_intensity}")
-                if avg_intensity < threshold:
-                    print(f"Edge found at {point}") 
-                    return point  # Found the edge of the road mark
-            # Step perpendicular to the line direction
-            point += direction * step_size
-
-    def get_intensity_at_point(location, search_radius, k):
-        # Query the k nearest points ignoring the Z coordinate
-        # Create a 2D version of the location by dropping the Z coordinate
-        location_2d = (location[0], location[1])
-
-        # Adjust the query to work with 2D points by dropping the Z coordinate
-        distances, nearest_indices = points_kdtree.query([location_2d], k=k)
-        distances = distances[0]  # distances will be returned as a 2D array, we want the inner array
-        nearest_indices = nearest_indices[0]  # same with nearest_indices
-
-        # Filter out the indices that are within the search radius
-        valid_indices = nearest_indices[distances < search_radius]
-
-        # If no valid points found within search radius, return 0 or other sentinel value
-        if len(valid_indices) == 0:
-            print("No points found within search radius.")
-            return 0
-
-        # Calculate the average intensity for the valid points
-        return get_average_intensity(valid_indices)
-
+    def region_grow(start_point, radius, threshold):
+        checked_indices = set()
+        indices_to_check = [start_point]
+        region_points = []
+        #visualize_search_radius(last_click_point, radius)
+        while indices_to_check:
+            current_index = indices_to_check.pop()
+            if current_index not in checked_indices:
+                checked_indices.add(current_index)
+                point_intensity = np.average(point_colors[current_index]) * 255
+                if point_intensity > threshold:
+                    region_points.append(point_coords[current_index])
+                    _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
+                    indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
+        '''for point in region_points:
+            mark_point(point,"regionpoint",0.01)'''
+        return region_points
     
+    def find_outward_points(region_points, direction):
+        if region_points:
+            # Project all points onto the direction vector and get the most outward points
+            projections = [np.dot(point, direction) for point in region_points]
+            min_proj_index = np.argmin(projections)
+            max_proj_index = np.argmax(projections)
+            return region_points[min_proj_index], region_points[max_proj_index]
+        else:
+            print("No points found to project.")
+            return last_click_point,last_click_point
+    # Assuming self.prev_end_point contains the previous click point
+    if self.prev_end_point is None:
+        raise ValueError("Previous click point is not set")
 
-    # Find edges on both sides of each point
-    left_edge_start = find_edge(start, -perp_direction)
-    right_edge_start = find_edge(start, perp_direction)
-    left_edge_end = find_edge(end, -perp_direction)
-    right_edge_end = find_edge(end, perp_direction)
+    # Get the direction vector between the two clicks and its perpendicular
+    direction = (last_click_point - self.prev_end_point).normalized()
+    perp_direction = direction.cross(Vector((0, 0, 1))).normalized()
 
-    # Calculate midpoints
-    mid_start = (left_edge_start + right_edge_start) * 0.5
-    mid_end = (left_edge_end + right_edge_end) * 0.5
-    
-    mark_point(left_edge_start,"left_edge_start",0.02)
-    mark_point(right_edge_start,"right_edge_start",0.02)
-    mark_point(left_edge_end,"left_edge_end",0.02)
-    mark_point(right_edge_end,"right_edge_end",0.02)
-    
-    mark_point(mid_start,"mid_start",0.02)
-    mark_point(mid_end,"mid_end",0.02)
-    
-    # Return the new start and end points for the snapped line
-    return mid_start, mid_end
+    # Find the index of the last click point in the point cloud
+    _, idx = points_kdtree.query([last_click_point], k=1)
 
+    # Perform region growing on the last click point
+    region = region_grow(idx[0], region_radius, intensity_threshold)
+    edge1, edge2 = find_outward_points(region, perp_direction)
+    mark_point(edge1,"edge1",0.02)
+    mark_point(edge2,"edge2",0.02)
+    # Calculate the new click point based on the edges
+    new_click_point = (edge1 + edge2) * 0.5
+    new_click_point_vector = Vector((new_click_point[0], new_click_point[1], new_click_point[2]))
+    return new_click_point_vector
 
     
 class AutoCurvedLineOperator(bpy.types.Operator):
