@@ -78,7 +78,7 @@ points_kdtree = None #The loaded ckdtree of coords that all functions can access
 collection_name = "Collection"
 point_cloud_point_size =  1
 shape_counter=1 #Keeps track of amount of shapes currently in viewport
-objects_z_height=10 #Height of all markings
+objects_z_height=0.1 #Height of all markings
 auto_load=True # Automatically imports a file called auto.laz on every execution 
 auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz
  
@@ -321,10 +321,10 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
             coord_3d_start = self.prev_end_point
         else:
             coord_3d_start = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-            coord_3d_start.z += objects_z_height  # Add to the z dimension to prevent clipping
+            #coord_3d_start.z += objects_z_height  # Add to the z dimension to prevent clipping
 
         coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-        coord_3d_end.z += objects_z_height  
+        #coord_3d_end.z += objects_z_height  
 
         # Create a new mesh object for the line
         mesh = bpy.data.meshes.new(name="Line Mesh")
@@ -370,72 +370,74 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
 
 
 #Function to create a colored, resizable line object on top of the line      
-def create_rectangle_object(start, end, width):
+def create_rectangle_object(start, end):
     
-        context = bpy.context
-        marking_color = context.scene.marking_color
-        transparency = context.scene.marking_transparency
-        # Calculate the direction vector and its length
-        direction = end - start
-        length = direction.length
+    context = bpy.context
+    marking_color = context.scene.marking_color
+    transparency = context.scene.marking_transparency
+    global objects_z_height
+    width = context.scene.fatline_width
+    # Calculate the direction vector and its length
+    direction = end - start
+    length = direction.length
 
-        direction.normalize()
+    direction.normalize()
 
-        # Calculate the rectangle's width
-        orthogonal = direction.cross(Vector((0, 0, 1)))
-        orthogonal.normalize()
-        orthogonal *= width / 2
+    # Calculate the rectangle's width
+    orthogonal = direction.cross(Vector((0, 0, 1)))
+    orthogonal.normalize()
+    orthogonal *= width / 2
 
-        # Calculate the rectangle's vertices
-        v1 = start + orthogonal
-        v2 = start - orthogonal
-        v3 = end - orthogonal
-        v4 = end + orthogonal
+    # Calculate the rectangle's vertices with an increase in the z-axis by objects_z_height
+    v1 = start + orthogonal + Vector((0, 0, objects_z_height))
+    v2 = start - orthogonal + Vector((0, 0, objects_z_height))
+    v3 = end - orthogonal + Vector((0, 0, objects_z_height))
+    v4 = end + orthogonal + Vector((0, 0, objects_z_height))
 
-        # Create a new mesh object for the rectangle
-        mesh = bpy.data.meshes.new(name="Rectangle Mesh")
-        obj = bpy.data.objects.new("Rectangle Line", mesh)
+    # Create a new mesh object for the rectangle
+    mesh = bpy.data.meshes.new(name="Rectangle Mesh")
+    obj = bpy.data.objects.new("Rectangle Line", mesh)
 
-        # Link it to the scene
-        bpy.context.collection.objects.link(obj)
+    # Link it to the scene
+    bpy.context.collection.objects.link(obj)
 
-        # Create mesh from python data
-        bm = bmesh.new()
+    # Create mesh from python data
+    bm = bmesh.new()
 
-        # Add vertices
-        bmesh.ops.create_vert(bm, co=v1)
-        bmesh.ops.create_vert(bm, co=v2)
-        bmesh.ops.create_vert(bm, co=v3)
-        bmesh.ops.create_vert(bm, co=v4)
+    # Add vertices
+    bmesh.ops.create_vert(bm, co=v1)
+    bmesh.ops.create_vert(bm, co=v2)
+    bmesh.ops.create_vert(bm, co=v3)
+    bmesh.ops.create_vert(bm, co=v4)
 
-        # Add faces
-        bm.faces.new(bm.verts)
+    # Add faces
+    bm.faces.new(bm.verts)
 
-        # Update and free bmesh to reduce memory usage
-        bm.to_mesh(mesh)
-        bm.free()
+    # Update and free bmesh to reduce memory usage
+    bm.to_mesh(mesh)
+    bm.free()
 
-        # Create a material for the rectangle and set its color
-        material = bpy.data.materials.new(name="Rectangle Material")
-        
-        # Set the color with alpha for transparency
-        material.diffuse_color = (marking_color[0], marking_color[1], marking_color[2], transparency)
+    # Create a material for the rectangle and set its color
+    material = bpy.data.materials.new(name="Rectangle Material")
+    
+    # Set the color with alpha for transparency
+    material.diffuse_color = (marking_color[0], marking_color[1], marking_color[2], transparency)
 
-        # Adjust the material settings to enable transparency
-        material.use_nodes = True
-        material.blend_method = 'BLEND'  # Use alpha blend mode
+    # Adjust the material settings to enable transparency
+    material.use_nodes = True
+    material.blend_method = 'BLEND'  # Use alpha blend mode
 
-        # Set the Principled BSDF shader's alpha value
-        principled_bsdf = next(node for node in material.node_tree.nodes if node.type == 'BSDF_PRINCIPLED')
-        principled_bsdf.inputs['Alpha'].default_value = transparency
-        
-        # Assign the material to the object
-        obj.data.materials.append(material)
+    # Set the Principled BSDF shader's alpha value
+    principled_bsdf = next(node for node in material.node_tree.nodes if node.type == 'BSDF_PRINCIPLED')
+    principled_bsdf.inputs['Alpha'].default_value = transparency
+    
+    # Assign the material to the object
+    obj.data.materials.append(material)
 
-        # After the object is created, store it 
-        store_object_state(obj)
+    # After the object is created, store it 
+    store_object_state(obj)
 
-        return obj
+    return obj
 
 #Prints the point cloud coordinates and the average color & intensity around mouse click        
 class GetPointsInfoOperator(bpy.types.Operator):
@@ -1164,11 +1166,13 @@ def draw_line(self, context, event):
     marking_color = context.scene.marking_color
     width = context.scene.fatline_width
     intensity_threshold = context.scene.intensity_threshold
+    #user_input=context.scene.user_input_result
     
     view3d = context.space_data
     region = context.region
     region_3d = context.space_data.region_3d
- 
+    
+    wrong_click=""
     
     # Convert the mouse position to a 3D location for the end point of the line
     coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
@@ -1188,56 +1192,48 @@ def draw_line(self, context, event):
 
         # Determine and print the outcome
         if on_white_start and on_white_end:
-            print(f"Mouseclick {self.click_counter - 1} and Mouseclick {self.click_counter}are both on a white road mark.")     
-            coord_3d_end = snap_to_road_mark(self, context, coord_3d_end)
+            print(f"Mouseclick {self.click_counter - 1} and Mouseclick {self.click_counter}are both on a white road mark.") 
+            wrong_click="none" 
+            coord_3d_start,coord_3d_end = snap_to_road_mark(self, context, coord_3d_start,coord_3d_end, click_to_correct=wrong_click)   
             
         elif on_white_start:
             print(f"Mouseclick {self.click_counter - 1} is on a white road mark,Mouseclick {self.click_counter} is not.")
+            wrong_click="second"
+            bpy.ops.wm.correction_pop_up('INVOKE_DEFAULT', start_point=coord_3d_start, end_point=coord_3d_end, click_to_correct=wrong_click)
+                
         elif on_white_end:
             print(f"Mouseclick {self.click_counter - 1} is not on a white road mark, Mouseclick {self.click_counter} is on.")
+            wrong_click="first"
+            bpy.ops.wm.correction_pop_up('INVOKE_DEFAULT', start_point=coord_3d_start, end_point=coord_3d_end, click_to_correct=wrong_click)
+                
         else:
             print(f"Neither Mouseclick {self.click_counter - 1} nor Mouseclick {self.click_counter} are on a white road mark.")
-           
-        # Create a new mesh object for the line
-        mesh = bpy.data.meshes.new(name="Line Mesh")
-        obj = bpy.data.objects.new("Line Object", mesh)
-        
-        # After the object is created, store it 
-        store_object_state(obj)
-        
-        # Link it to scene
-        bpy.context.collection.objects.link(obj)
-        
-        # Create mesh from python data
-        bm = bmesh.new()
+            wrong_click="both"
+            bpy.ops.wm.correction_pop_up('INVOKE_DEFAULT', start_point=coord_3d_start, end_point=coord_3d_end, click_to_correct=wrong_click)
 
-        # Add vertices
-        bmesh.ops.create_vert(bm, co=coord_3d_start)
-        bmesh.ops.create_vert(bm, co=coord_3d_end)
-
-        # Add an edge between the vertices
-        new_edge = bm.edges.new(bm.verts[-2:])  # Create edge with the last two vertices
-
-        # Update and free bmesh to avoid memory leaks
-        bm.to_mesh(mesh)
-        bm.free()
-
-        # Create a material for the line and set its color
-        material = bpy.data.materials.new(name="Line Material")
-        material.diffuse_color = marking_color
-        obj.data.materials.append(material)
- 
-        # Create a rectangle object on top of the line
-        create_rectangle_object(coord_3d_start, coord_3d_end, width)
 
     # Update the previous end point to be the current one for the next click
     self.prev_end_point = coord_3d_end
     
 
-def snap_to_road_mark(self, context, last_click_point):
+def snap_to_road_mark(self, context, first_click_point, last_click_point, click_to_correct):
+    
     intensity_threshold = context.scene.intensity_threshold
     region_radius = 10
+    
     global point_coords, point_colors, points_kdtree
+        
+    if self.prev_end_point is None:
+        raise ValueError("Previous click point is not set")
+
+    # Get the direction vector between the two clicks and its perpendicular
+    direction = (last_click_point - self.prev_end_point).normalized()
+    perp_direction = direction.cross(Vector((0, 0, 1))).normalized()
+
+    # Find the index of the last click point in the point cloud
+    _, idx = points_kdtree.query([last_click_point], k=1)
+    
+        
     def region_grow(start_point, radius, threshold):
         checked_indices = set()
         indices_to_check = [start_point]
@@ -1257,37 +1253,80 @@ def snap_to_road_mark(self, context, last_click_point):
         return region_points
     
     def find_outward_points(region_points, direction):
-        if region_points:
-            # Project all points onto the direction vector and get the most outward points
-            projections = [np.dot(point, direction) for point in region_points]
-            min_proj_index = np.argmin(projections)
-            max_proj_index = np.argmax(projections)
-            return region_points[min_proj_index], region_points[max_proj_index]
+        # Project all points onto the direction vector and get the most outward points
+        projections = [np.dot(point, direction) for point in region_points]
+        min_proj_index = np.argmin(projections)
+        max_proj_index = np.argmax(projections)
+        return region_points[min_proj_index], region_points[max_proj_index]
+        
+    def snap_last_point(_first_click_point, _last_click_point):
+        
+        # Perform region growing on the last click point
+        region = region_grow(idx[0], region_radius, intensity_threshold)
+        if region:
+            edge1, edge2 = find_outward_points(region, perp_direction)
+            mark_point(edge1,"edge1",0.02)
+            mark_point(edge2,"edge2",0.02)
+            # Calculate the new click point based on the edges
+            _last_click_point = (edge1 + edge2) * 0.5
+            _last_click_point = Vector((_last_click_point[0], _last_click_point[1], _last_click_point[2]))
         else:
             print("No points found to project.")
-            return last_click_point,last_click_point
-    # Assuming self.prev_end_point contains the previous click point
-    if self.prev_end_point is None:
-        raise ValueError("Previous click point is not set")
+            
+        return _first_click_point, _last_click_point
 
-    # Get the direction vector between the two clicks and its perpendicular
-    direction = (last_click_point - self.prev_end_point).normalized()
-    perp_direction = direction.cross(Vector((0, 0, 1))).normalized()
-
-    # Find the index of the last click point in the point cloud
-    _, idx = points_kdtree.query([last_click_point], k=1)
-
-    # Perform region growing on the last click point
-    region = region_grow(idx[0], region_radius, intensity_threshold)
-    edge1, edge2 = find_outward_points(region, perp_direction)
-    mark_point(edge1,"edge1",0.02)
-    mark_point(edge2,"edge2",0.02)
-    # Calculate the new click point based on the edges
-    new_click_point = (edge1 + edge2) * 0.5
-    new_click_point_vector = Vector((new_click_point[0], new_click_point[1], new_click_point[2]))
-    return new_click_point_vector
-
+    if(click_to_correct=="none"): 
+        snap_last_point(first_click_point,last_click_point)
     
+    elif(click_to_correct=="first"):
+        print("first point corrected")
+        return first_click_point, last_click_point
+    elif(click_to_correct=="second"):
+        print("second point corrected")
+        return first_click_point, last_click_point
+    elif(click_to_correct=="both"):
+        print("both points corrected")
+        return first_click_point, last_click_point
+
+# Custom operator for the pop-up dialog
+class CorrectionPopUpOperator(bpy.types.Operator):
+    bl_idname = "wm.correction_pop_up"
+    bl_label = "Confirm correction pop up"
+
+    start_point: bpy.props.FloatVectorProperty()
+    end_point: bpy.props.FloatVectorProperty()
+    click_to_correct: bpy.props.StringProperty()
+    
+    action: bpy.props.EnumProperty(
+        items=[
+            ('DRAW', "Draw Line", "Draw the line anyway"),
+            ('CORRECT', "Correct Line", "Try to correct the line"),
+            ('CANCEL', "Cancel", "Cancel the drawing")
+        ],
+        default='DRAW',
+    )
+
+    def execute(self, context):
+        # Access the stored data to perform the correction
+        coord_3d_start = Vector(self.start_point)
+        coord_3d_end = Vector(self.end_point)
+        click_to_correct = self.click_to_correct
+        
+        print("User chose to", "draw" if self.action == 'DRAW' else "correct")
+        # Based on the user's choice, either draw or initiate a correction process
+        context.scene.user_input_result = self.action
+        
+        if self.action == 'CORRECT':
+            coord_3d_start, coord_3d_end = snap_to_road_mark(self,context, coord_3d_start, coord_3d_end, click_to_correct)
+            
+        create_rectangle_object(coord_3d_start, coord_3d_end)
+        
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self)
+            
 class AutoCurvedLineOperator(bpy.types.Operator):
     bl_idname = "custom.auto_curved_line"
     bl_label = "Mark curved line" 
@@ -2117,7 +2156,8 @@ def store_object_state(obj):
     undo_stack.append(obj_state) 
     # Clear the redo stack
     redo_stack.clear()  
-    
+
+        
 # Panel for the Road Marking Digitizer
 class DIGITIZE_PT_Panel(bpy.types.Panel):
     bl_label = "Road Marking Digitizer"
@@ -2199,7 +2239,7 @@ def register():
     bpy.utils.register_class(RectangleMarkOperator)
     bpy.utils.register_class(AutoCurvedLineOperator)
     bpy.utils.register_class(CurvedLineMarkOperator)
-    
+    bpy.utils.register_class(CorrectionPopUpOperator)
 
 
     
@@ -2256,7 +2296,10 @@ def register():
         default=0.5,  # Default transparency is 50%
         min=0.0, max=1.0  # Transparency can range from 0.0 to 1.0
     )
-  
+    bpy.types.Scene.user_input_result = bpy.props.StringProperty(
+    name="User Input Result",
+    description="Stores the result from the user input pop-up",
+)
     bpy.utils.register_class(FindALlRoadMarkingsOperator)
     bpy.utils.register_class(OBJECT_OT_simple_undo)
     bpy.utils.register_class(OBJECT_OT_simple_redo)
@@ -2285,12 +2328,14 @@ def unregister():
     bpy.utils.unregister_class(AutoCurvedLineOperator)
     bpy.utils.unregister_class(CurvedLineMarkOperator)
     bpy.utils.unregister_class(CreatePointCloudObjectOperator)
-
+    bpy.utils.unregister_class(CorrectionPopUpOperator)
+    
     del bpy.types.Scene.marking_transparency
     del bpy.types.Scene.marking_color
     del bpy.types.Scene.intensity_threshold
     del bpy.types.Scene.markings_threshold
     del bpy.types.Scene.fatline_width
+    del bpy.types.Scene.user_input_result
     
     bpy.utils.unregister_class(OBJECT_OT_simple_undo)
     bpy.utils.unregister_class(OBJECT_OT_simple_redo)
@@ -2302,6 +2347,13 @@ if __name__ == "__main__":
     
     if(auto_load):
         bpy.ops.wm.las_auto_open()
+        
+        
+        
+        
+        
+        
+        
         
         
         
@@ -3174,7 +3226,7 @@ def is_click_on_white(self, context, location):
     intensity_threshold = context.scene.intensity_threshold
 
     # Define the number of nearest neighbors to search for
-    num_neighbors = 10
+    num_neighbors = 5
     
     # Use the k-d tree to find the nearest points to the click location
     _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
