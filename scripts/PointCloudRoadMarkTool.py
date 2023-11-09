@@ -1194,7 +1194,8 @@ def draw_line(self, context, event):
         if on_white_start and on_white_end:
             print(f"Mouseclick {self.click_counter - 1} and Mouseclick {self.click_counter}are both on a white road mark.") 
             wrong_click="none" 
-            coord_3d_start,coord_3d_end = snap_to_road_mark(self, context, coord_3d_start,coord_3d_end, click_to_correct=wrong_click)   
+            coord_3d_start, coord_3d_end = snap_to_road_mark(self, context, coord_3d_start,coord_3d_end, click_to_correct=wrong_click)   
+            create_rectangle_object(coord_3d_start, coord_3d_end)
             
         elif on_white_start:
             print(f"Mouseclick {self.click_counter - 1} is on a white road mark,Mouseclick {self.click_counter} is not.")
@@ -1223,11 +1224,11 @@ def snap_to_road_mark(self, context, first_click_point, last_click_point, click_
     
     global point_coords, point_colors, points_kdtree
         
-    if self.prev_end_point is None:
-        raise ValueError("Previous click point is not set")
+    '''if self.prev_end_point is None:
+        raise ValueError("Previous click point is not set")'''
 
     # Get the direction vector between the two clicks and its perpendicular
-    direction = (last_click_point - self.prev_end_point).normalized()
+    direction = (last_click_point - first_click_point).normalized()
     perp_direction = direction.cross(Vector((0, 0, 1))).normalized()
 
     # Find the index of the last click point in the point cloud
@@ -1273,12 +1274,38 @@ def snap_to_road_mark(self, context, first_click_point, last_click_point, click_
         else:
             print("No points found to project.")
             
+        mark_point(_first_click_point,"_first_click_point",0.02)
+        mark_point(_last_click_point,"_last_click_point",0.02)
         return _first_click_point, _last_click_point
 
     if(click_to_correct=="none"): 
-        snap_last_point(first_click_point,last_click_point)
+        new_first_click_point, new_last_click_point = snap_last_point(first_click_point,last_click_point)
+        return new_first_click_point, new_last_click_point
     
+    def snap_first_point(_first_click_point, _last_click_point):
+        
+        # Perform region growing on the last click point
+        region = region_grow(idx[0], region_radius, intensity_threshold)
+        if region:
+            edge1, edge2 = find_outward_points(region, perp_direction)
+            mark_point(edge1,"edge1",0.02)
+            mark_point(edge2,"edge2",0.02)
+            # Calculate the new click point based on the edges
+            _first_click_point = (edge1 + edge2) * 0.5
+            _first_click_point = Vector((_first_click_point[0], _first_click_point[1], _first_click_point[2]))
+        else:
+            print("No points found to project.")
+            
+        mark_point(_first_click_point,"_first_click_point",0.02)
+        mark_point(_last_click_point,"_last_click_point",0.02)
+        return _first_click_point, _last_click_point
+
+    if(click_to_correct=="none"): 
+        new_first_click_point, new_last_click_point = snap_last_point(first_click_point,last_click_point)
+        return new_first_click_point, new_last_click_point    
     elif(click_to_correct=="first"):
+        new_first_click_point, new_last_click_point = snap_first_point(first_click_point,last_click_point)
+        return new_first_click_point, new_last_click_point   
         print("first point corrected")
         return first_click_point, last_click_point
     elif(click_to_correct=="second"):
@@ -1305,21 +1332,35 @@ class CorrectionPopUpOperator(bpy.types.Operator):
         ],
         default='DRAW',
     )
-
+    # Define the custom draw method
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column()
+        
+        # Add custom buttons to the UI
+        col.label(text="Choose an action:")
+        col.separator()
+        
+        # Use 'props_enum' to create buttons for each enum property
+        layout.props_enum(self, "action")
+        
     def execute(self, context):
         # Access the stored data to perform the correction
         coord_3d_start = Vector(self.start_point)
         coord_3d_end = Vector(self.end_point)
         click_to_correct = self.click_to_correct
         
-        print("User chose to", "draw" if self.action == 'DRAW' else "correct")
+        #print("User chose to", "draw" if self.action == 'DRAW' else "correct")
         # Based on the user's choice, either draw or initiate a correction process
         context.scene.user_input_result = self.action
-        
-        if self.action == 'CORRECT':
+       
+        if self.action == 'CORRECT' or click_to_correct=="none":
             coord_3d_start, coord_3d_end = snap_to_road_mark(self,context, coord_3d_start, coord_3d_end, click_to_correct)
-            
-        create_rectangle_object(coord_3d_start, coord_3d_end)
+        
+        if self.action == ('CANCEL'):
+            print("Canceled line drawing")
+        else:
+            create_rectangle_object(coord_3d_start, coord_3d_end)
         
         return {'FINISHED'}
 
@@ -3226,7 +3267,7 @@ def is_click_on_white(self, context, location):
     intensity_threshold = context.scene.intensity_threshold
 
     # Define the number of nearest neighbors to search for
-    num_neighbors = 5
+    num_neighbors = 20
     
     # Use the k-d tree to find the nearest points to the click location
     _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
