@@ -924,7 +924,11 @@ class TriangleMarkOperator(bpy.types.Operator):
     bl_label = "Mark Triangle"
     
     _is_running = False  # Class variable to check if the operator is already running
-    
+    _triangles = []  # List to store the triangle vertices
+    _simulated_clicks = 0  # Count of simulated clicks
+    _found_triangles = 0   # Count of triangles found
+    _processed_indices = set()
+                
     def modal(self, context, event):
         global point_coords, point_colors, points_kdtree
         intensity_threshold = context.scene.intensity_threshold
@@ -978,41 +982,94 @@ class TriangleMarkOperator(bpy.types.Operator):
                             indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
 
                 print("Region growing completed", time.time()-start_time)
-                
+         
             
             else:
                 print("no road markings found")
                 
+
             if rectangle_coords:
-                # Create a single mesh for the combined  rectangles
-                create_shape(rectangle_coords,shape_type="triangle")
+                #filters out bad points
+                rectangle_coords = filter_noise_with_dbscan(rectangle_coords, 0.06, 10)
+                self._processed_indices.update(checked_indices)
+                triangle_vertices = create_flexible_triangle(rectangle_coords)
+                self._triangles.append(triangle_vertices)
+                create_shape(rectangle_coords, shape_type="triangle")
+
+                if len(self._triangles) == 2:
+                    self.perform_automatic_marking(context, intensity_threshold)
                 
-        
         elif event.type == 'ESC':
             SimpleMarkOperator._is_running = False
             print("Operation was cancelled")
             return {'CANCELLED'}  # Stop when ESCAPE is pressed
+        
+        return {'RUNNING_MODAL'}
+    
+    def perform_automatic_marking(self, context, intensity_threshold):
+        centers = [np.mean(triangle, axis=0) for triangle in self._triangles[:2]]
+        line_points = self.interpolate_line(centers[0], centers[1])
 
-        return {'PASS_THROUGH'}
+        for point in line_points:
+            mark_point(point)
+            self.simulate_click_and_grow(point, context, intensity_threshold)
+
+    def simulate_click_and_grow(self, location, context, intensity_threshold):
+        global point_coords, point_colors, points_kdtree
+
+        _, nearest_indices = points_kdtree.query([location], k=16)
+        average_intensity = get_average_intensity(nearest_indices[0])
+        average_color = get_average_color(nearest_indices[0])
+
+        if (average_intensity > intensity_threshold or np.all(average_color > 160)) and not self._processed_indices.intersection(nearest_indices[0]):
+            # Proceed only if the intensity is above the threshold and the area hasn't been processed yet
+            checked_indices = set()
+            indices_to_check = list(nearest_indices[0])
+
+            while indices_to_check:
+                current_index = indices_to_check.pop()
+                if current_index not in checked_indices:
+                    checked_indices.add(current_index)
+                    intensity = np.average(point_colors[current_index]) * 255
+                    if intensity > intensity_threshold:
+                        _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=50)
+                        indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
+
+            if checked_indices:
+                points= [point_coords[i] for i in checked_indices]
+                points = filter_noise_with_dbscan(points, 0.06, 10)
+                self._processed_indices.update(checked_indices)
+                triangle_vertices = create_flexible_triangle(points)
+                self._triangles.append(triangle_vertices)
+                self._found_triangles += 1
+                create_shape(points, shape_type="triangle")       
+                
+       
+        #return {'PASS_THROUGH'}
+        
+    def interpolate_line(self, start, end, num_points=50):
+        # Generate points along the line between start and end
+        return [start + t * (end - start) for t in np.linspace(0, 1, num_points)]
 
     
     def invoke(self, context, event):
-        if SimpleMarkOperator._is_running:
+        if TriangleMarkOperator ._is_running:
             self.report({'WARNING'}, "Operator is already running")
             return {'CANCELLED'}  # Do not run the operator if it's already running
 
         if context.area.type == 'VIEW_3D':
-            SimpleMarkOperator._is_running = True  # Set the flag to indicate the operator is running
+            TriangleMarkOperator ._is_running = True  # Set the flag to indicate the operator is running
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
 
     def cancel(self, context):
-        SimpleMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
+        TriangleMarkOperator ._is_running = False  # Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  # Debug message
         return {'CANCELLED'}
- 
+
+
 
 class RectangleMarkOperator(bpy.types.Operator):
     bl_idname = "custom.mark_rectangle"
@@ -1794,6 +1851,14 @@ def create_shape(coords_list, shape_type):
     store_object_state(obj)
     print(f"Rendered {shape_type} shape in: {time.time() - start_time:.2f} seconds")
 
+def interpolate_middle_points(points, t):
+
+    new_points = []
+    for i in range(len(points) - 1):
+        start, end = points[i], points[i + 1]
+        interp_point = (1 - t) * np.array(start) + t * np.array(end)
+        new_points.append(interp_point.tolist())
+    return new_points
    
 def create_mesh_with_material(obj_name, shape_coords, marking_color, transparency):
     
@@ -1845,7 +1910,7 @@ def create_dots_shape(coords_list):
     max_gap = 10  # Maximum gap size to fill
 
     #filters out bad points
-    distance_between_cords = 0.03
+    distance_between_cords = 0.06
     required_surrounded_cords= 10
     coords_list = filter_noise_with_dbscan(coords_list, distance_between_cords, required_surrounded_cords)
     
