@@ -1231,23 +1231,23 @@ def draw_line(self, context, event):
     
     wrong_click=""
     
-    # Convert the mouse position to a 3D location for the end point of the line
+    #Convert the mouse position to a 3D location for the end point of the line
     coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
     #coord_3d_end.z += objects_z_height  # Add to the z dimension to prevent clipping
 
-    # Check if the current click is on a white road mark
+    #Check if the current click is on a white road mark
     on_white_end = is_click_on_white(self, context, coord_3d_end)
     self.click_counter += 1
     print(f"Mouseclick {self.click_counter} is {'on' if on_white_end else 'not on'} a white road mark.")
 
     if self.prev_end_point:
-        # Use the previous end point as the start point for the new line segment
+        #Use the previous end point as the start point for the new line segment
         coord_3d_start = self.prev_end_point
 
-        # Check if the previous click was on a white road mark
+        #Check if the previous click was on a white road mark
         on_white_start = is_click_on_white(self, context, coord_3d_start)
 
-        # Determine and print the outcome
+        #Determine and print the outcome
         if on_white_start and on_white_end:
             print(f"Mouseclick {self.click_counter - 1} and Mouseclick {self.click_counter}are both on a white road mark.") 
             wrong_click="none" 
@@ -1270,7 +1270,7 @@ def draw_line(self, context, event):
             bpy.ops.wm.correction_pop_up('INVOKE_DEFAULT', start_point=coord_3d_start, end_point=coord_3d_end, click_to_correct=wrong_click)
 
 
-    # Update the previous end point to be the current one for the next click
+    #Update the previous end point to be the current one for the next click
     self.prev_end_point = coord_3d_end
     
 
@@ -1284,11 +1284,11 @@ def snap_to_road_mark(self, context, first_click_point, last_click_point, click_
     '''if self.prev_end_point is None:
         raise ValueError("Previous click point is not set")'''
 
-    # Get the direction vector between the two clicks and its perpendicular
+    #Get the direction vector between the two clicks and its perpendicular
     direction = (last_click_point - first_click_point).normalized()
     perp_direction = direction.cross(Vector((0, 0, 1))).normalized()
 
-    # Find the index of the last click point in the point cloud
+    #Find the index of the last click point in the point cloud
     _, idx = points_kdtree.query([last_click_point], k=1)
     
         
@@ -1627,6 +1627,32 @@ def create_flexible_triangle(coords):
 
     return [vertex1.tolist(), vertex2.tolist(), third_vertex.tolist()]
 
+def create_triangle_outline(vertices):
+    # Create a new mesh and object for the triangle outline
+    mesh = bpy.data.meshes.new(name="TriangleOutline")
+    obj = bpy.data.objects.new("TriangleOutline", mesh)
+
+    # Link the object to the scene
+    bpy.context.collection.objects.link(obj)
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+
+    # Define edges for the triangle outline
+    edges = [(0, 1), (1, 2), (2, 0)]
+
+    # Create the mesh data
+    mesh.from_pydata(vertices, edges, [])  # No faces
+    mesh.update()
+
+    # Ensure the object scale is applied
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    
+    '''wireframe_modifier = obj.modifiers.new(name="Wireframe", type='WIREFRAME')
+    wireframe_modifier.thickness = 0.1 # Adjust this value for desired thickness'''
+    
+    return obj
+
 def create_flexible_rectangle(coords):
     
     hull = ConvexHull(coords)
@@ -1742,7 +1768,7 @@ def create_fixed_square(context, location, size=1.0):
 
     
 def create_fixed_length_segments(points, segment_length=1.0):
-    # This function generates points on a polyline with fixed segment lengths
+    # function generates points on a polyline with fixed segment lengths
     extended_points = [Vector(points[0])]  # Start with the first point
     total_distance = 0  # Keep track of the total distance
     segment_count = 0  # Count the number of full segments
@@ -1832,6 +1858,8 @@ def create_shape(coords_list, shape_type):
         obj=create_mesh_with_material(
             "triangle Shape", shape_coords,
             marking_color, transparency)
+        vertices=create_flexible_triangle(coords_list)
+        obj=create_triangle_outline(vertices)
     elif shape_type == "rectangle":
         print("Drawing rectangle")
         shape_coords = create_flexible_rectangle(coords_list)
