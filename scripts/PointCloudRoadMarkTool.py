@@ -1311,7 +1311,7 @@ def snap_to_road_mark(self, context, first_click_point, last_click_point, click_
         return region_points
     
     def find_outward_points(region_points, direction):
-        # Project all points onto the direction vector and get the most outward points
+        #Project all points to the direction vector and find the most outward points
         projections = [np.dot(point, direction) for point in region_points]
         min_proj_index = np.argmin(projections)
         max_proj_index = np.argmax(projections)
@@ -1319,13 +1319,13 @@ def snap_to_road_mark(self, context, first_click_point, last_click_point, click_
         
     def snap_last_point(_first_click_point, _last_click_point):
         
-        # Perform region growing on the last click point
+        #Perform region growing on the last click point
         region = region_grow(idx[0], region_radius, intensity_threshold)
         if region:
             edge1, edge2 = find_outward_points(region, perp_direction)
             mark_point(edge1,"edge1",0.02)
             mark_point(edge2,"edge2",0.02)
-            # Calculate the new click point based on the edges
+            #Calculate the new click point based on the edges
             _last_click_point = (edge1 + edge2) * 0.5
             _last_click_point = Vector((_last_click_point[0], _last_click_point[1], _last_click_point[2]))
         else:
@@ -1395,6 +1395,7 @@ class CorrectionPopUpOperator(bpy.types.Operator):
         col = layout.column()
         
         # Add custom buttons to the UI
+        col.label(text=f"{self.click_to_correct} Click(s) might be incorrect")
         col.label(text="Choose an action:")
         col.separator()
         
@@ -1815,6 +1816,31 @@ def find_middle_points(top_left, bottom_left, highest_top, lowest_bottom, top_ri
     mark_point(middle_right,"middle_right")
     return middle_left, middle_curve, middle_right
 
+def find_middle_points2(top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right):
+    # Calculate middle points
+    middle_top = (top_left + top_right) / 2
+    middle_bottom = (bottom_left + bottom_right) / 2
+    middle_curve = (highest_top + lowest_bottom) / 2
+
+    # Calculate 25% and 75% points for top and bottom lines
+    quarter_top = top_left + 0.25 * (top_right - top_left)
+    three_quarter_top = top_left + 0.75 * (top_right - top_left)
+    quarter_bottom = bottom_left + 0.25 * (bottom_right - bottom_left)
+    three_quarter_bottom = bottom_left + 0.75 * (bottom_right - bottom_left)
+    
+    mark_point(middle_bottom,"middle_left")
+    mark_point(middle_curve,"middle_curve")
+    mark_point(middle_top,"middle_right")
+    
+    mark_point(quarter_top,"quarter_top")
+    mark_point(three_quarter_top,"three_quarter_top")
+    mark_point(quarter_bottom,"quarter_bottom")
+    mark_point(three_quarter_bottom,"three_quarter_bottom")
+
+    return [top_left, quarter_top, middle_top, three_quarter_top, top_right, 
+            middle_curve, 
+            bottom_right, three_quarter_bottom, middle_bottom, quarter_bottom, bottom_left]
+            
 def create_polyline(name, points, width=0.01, color=(1, 0, 0, 1)):
     # Create a new curve data object
     curve_data = bpy.data.curves.new(name, type='CURVE')
@@ -1842,6 +1868,78 @@ def create_polyline(name, points, width=0.01, color=(1, 0, 0, 1)):
     curve_obj.data.materials.append(mat)
 
     return curve_obj
+
+def create_polyline2(name, points, width=0.01, color=(1, 0, 0, 1)):
+    # Create a new curve data object
+    curve_data = bpy.data.curves.new(name, type='CURVE')
+    curve_data.dimensions = '3D'
+
+    # Create a new spline in the curve
+    spline = curve_data.splines.new('BEZIER')
+    spline.bezier_points.add(len(points) - 1)  # The new spline has no points by default, add them
+
+    # Assign the points to the spline and handle types
+    for i, point in enumerate(points):
+        bp = spline.bezier_points[i]
+        bp.co = point
+        bp.handle_left_type = 'AUTO'
+        bp.handle_right_type = 'AUTO'
+
+    # Create a new object with the curve
+    curve_obj = bpy.data.objects.new(name, curve_data)
+    bpy.context.collection.objects.link(curve_obj)
+
+    # Set the curve to use a full path and set the bevel depth for width
+    curve_data.use_path = True
+    curve_data.bevel_depth = width
+
+    # Create a new material with the given color
+    mat = bpy.data.materials.new(name + "_Mat")
+    mat.diffuse_color = color
+    curve_obj.data.materials.append(mat)
+
+    return curve_obj
+
+def create_polyline3(name,points, width=0.01, color=(1, 0, 0, 1)):
+    # Create a new curve data object
+    curve_data = bpy.data.curves.new(name, type='CURVE')
+    curve_data.dimensions = '3D'
+
+    # Create a new spline in the curve
+    spline = curve_data.splines.new('BEZIER')
+    spline.bezier_points.add(2)  # We need exactly three points for the Bezier spline
+
+    # Assign the points to the spline. The handles will be automatically calculated.
+    spline.bezier_points[0].co = points[0]
+    spline.bezier_points[0].handle_left_type = 'AUTO'
+    spline.bezier_points[0].handle_right_type = 'AUTO'
+
+    spline.bezier_points[1].co = points[1]
+    spline.bezier_points[1].handle_left_type = 'AUTO'
+    spline.bezier_points[1].handle_right_type = 'AUTO'
+
+    spline.bezier_points[2].co = points[2]
+    spline.bezier_points[2].handle_left_type = 'AUTO'
+    spline.bezier_points[2].handle_right_type = 'AUTO'
+
+    # Create a new object with the curve
+    curve_obj = bpy.data.objects.new(name, curve_data)
+    bpy.context.collection.objects.link(curve_obj)
+
+    # Set the curve to use a full path and set the bevel depth for width
+    curve_data.bevel_depth = width
+
+    # Create a new material with the given color
+    mat = bpy.data.materials.new(name + "_Mat")
+    mat.diffuse_color = color
+    curve_obj.data.materials.append(mat)
+
+    # Ensure the curve data is updated with the new information
+    #curve_data.update()
+
+    return curve_obj
+
+
 
 #Define a function to create a single mesh for combined rectangles
 def create_shape(coords_list, shape_type):
