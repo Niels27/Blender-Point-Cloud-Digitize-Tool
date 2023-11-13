@@ -1684,12 +1684,12 @@ def create_shape(coords_list, shape_type):
         
     elif shape_type == "curved line":
         print("Drawing curved line")
-        middle_points = find_extreme_points2(coords_list)
+        middle_points = find_extreme_points3(coords_list)
         fixed_length_points, total_length, segments = create_fixed_length_segments(middle_points)
         print(f"Total line length: {total_length:.2f} meters")
         print(f"Segmented lines drawn: {segments}")
 
-        obj=create_polyline("CurvedLine", fixed_length_points, width=line_width, color=(marking_color[0], marking_color[1], marking_color[2], transparency))
+        obj=create_polyline("CurvedLine", middle_points, width=line_width, color=(marking_color[0], marking_color[1], marking_color[2], transparency))
    
     else:
         print("Drawing unkown Shape")
@@ -3398,7 +3398,7 @@ def find_extreme_points(coords_list):
         mark_point(point, extreme_point_names[i])
     return top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right
 
-def find_middle_points_recursive(coords_list, num_segments):
+def find_middle_points4(coords_list, num_segments):
     def recursive_find(coords, start, end, num_segments, middle_points):
         if num_segments <= 1:
             return
@@ -3430,7 +3430,7 @@ def find_middle_points_recursive(coords_list, num_segments):
 
     return list(middle_points)
 
-def find_middle_points1(top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right):
+def find_middle_points(top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right):
   
     # Calculate the middle point between top_left and bottom_left
     middle_left = [(top_left[i] + bottom_left[i]) / 2 for i in range(len(top_left))]
@@ -3483,7 +3483,7 @@ def find_middle_points2(top_left, bottom_left, highest_top, lowest_bottom, top_r
             middle_curve, 
             bottom_right, three_quarter_bottom, middle_bottom, quarter_bottom, bottom_left]
 
-def find_middle_of_extreme_points(coords_list, num_pairs=6):
+def find_extreme_points2(coords_list, num_pairs=6):
     # Helper function to find new extreme point
     def find_new_extreme_point(point1, point2, coords_np):
         filtered_points = coords_np[(coords_np[:, 0] > min(point1[0], point2[0])) & (coords_np[:, 0] < max(point1[0], point2[0]))]
@@ -3517,10 +3517,11 @@ def find_middle_of_extreme_points(coords_list, num_pairs=6):
 
     return middle_points
 
-def find_extreme_points2(coords_list):
-    
+def find_extreme_points3(coords_list, num_points=10):
+    if num_points < 2:
+        raise ValueError("Number of points must be at least 2")
+
     coords_np = np.array(coords_list)
-    coords_x = coords_np[:, 0]
     coords_y = coords_np[:, 1]
 
     top_mask = coords_y >= np.median(coords_y)
@@ -3531,11 +3532,17 @@ def find_extreme_points2(coords_list):
     top_half_sorted = top_half[np.argsort(top_half[:, 0])]
     bottom_half_sorted = bottom_half[np.argsort(bottom_half[:, 0])]
 
+    # Ensure that the first and last points are included
+    indices_top = np.round(np.linspace(0, len(top_half_sorted) - 1, num_points)).astype(int)
+    indices_bottom = np.round(np.linspace(0, len(bottom_half_sorted) - 1, num_points)).astype(int)
+
     # Pair points from top and bottom halves
     pairs = []
-    for top_point, bottom_point in zip(top_half_sorted, bottom_half_sorted):
+    for i in range(num_points):
+        top_point = top_half_sorted[indices_top[i]]
+        bottom_point = bottom_half_sorted[indices_bottom[i]]
         pairs.append((top_point, bottom_point))
-    
+
     middle_points = []
     for top_point, bottom_point in pairs:
         middle_point = (top_point + bottom_point) / 2
@@ -3543,4 +3550,3 @@ def find_extreme_points2(coords_list):
         mark_point(middle_point, "middle_point")
 
     return middle_points
-    
