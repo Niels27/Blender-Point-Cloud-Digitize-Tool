@@ -368,77 +368,6 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
             context.object.select_set(True)
             bpy.ops.object.delete()    
 
-
-#Function to create a colored, resizable line object on top of the line      
-def create_rectangle_object(start, end):
-    
-    context = bpy.context
-    marking_color = context.scene.marking_color
-    transparency = context.scene.marking_transparency
-    global objects_z_height
-    width = context.scene.fatline_width
-    # Calculate the direction vector and its length
-    direction = end - start
-    length = direction.length
-
-    direction.normalize()
-
-    # Calculate the rectangle's width
-    orthogonal = direction.cross(Vector((0, 0, 1)))
-    orthogonal.normalize()
-    orthogonal *= width / 2
-
-    # Calculate the rectangle's vertices with an increase in the z-axis by objects_z_height
-    v1 = start + orthogonal + Vector((0, 0, objects_z_height))
-    v2 = start - orthogonal + Vector((0, 0, objects_z_height))
-    v3 = end - orthogonal + Vector((0, 0, objects_z_height))
-    v4 = end + orthogonal + Vector((0, 0, objects_z_height))
-
-    # Create a new mesh object for the rectangle
-    mesh = bpy.data.meshes.new(name="Rectangle Mesh")
-    obj = bpy.data.objects.new("Rectangle Line", mesh)
-
-    # Link it to the scene
-    bpy.context.collection.objects.link(obj)
-
-    # Create mesh from python data
-    bm = bmesh.new()
-
-    # Add vertices
-    bmesh.ops.create_vert(bm, co=v1)
-    bmesh.ops.create_vert(bm, co=v2)
-    bmesh.ops.create_vert(bm, co=v3)
-    bmesh.ops.create_vert(bm, co=v4)
-
-    # Add faces
-    bm.faces.new(bm.verts)
-
-    # Update and free bmesh to reduce memory usage
-    bm.to_mesh(mesh)
-    bm.free()
-
-    # Create a material for the rectangle and set its color
-    material = bpy.data.materials.new(name="Rectangle Material")
-    
-    # Set the color with alpha for transparency
-    material.diffuse_color = (marking_color[0], marking_color[1], marking_color[2], transparency)
-
-    # Adjust the material settings to enable transparency
-    material.use_nodes = True
-    material.blend_method = 'BLEND'  # Use alpha blend mode
-
-    # Set the Principled BSDF shader's alpha value
-    principled_bsdf = next(node for node in material.node_tree.nodes if node.type == 'BSDF_PRINCIPLED')
-    principled_bsdf.inputs['Alpha'].default_value = transparency
-    
-    # Assign the material to the object
-    obj.data.materials.append(material)
-
-    # After the object is created, store it 
-    store_object_state(obj)
-
-    return obj
-
 #Prints the point cloud coordinates and the average color & intensity around mouse click        
 class GetPointsInfoOperator(bpy.types.Operator):
     bl_idname = "view3d.select_points"
@@ -492,34 +421,6 @@ class GetPointsInfoOperator(bpy.types.Operator):
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
-
-def get_average_intensity(indices):
-    # If indices is a NumPy array with more than one dimension, flatten it
-    if isinstance(indices, np.ndarray) and indices.ndim > 1:
-        indices = indices.flatten()
-
-    # If indices is a scalar, convert it to a list with a single element
-    if np.isscalar(indices):
-        indices = [indices]
-
-    total_intensity = 0.0
-    point_amount = len(indices)
-    for index in indices:
-        
-        intensity = np.average(point_colors[index]) * 255  
-        total_intensity += intensity
-
-    return total_intensity / point_amount
-
-
-def get_average_color(indices):
-    point_amount=len(indices)
-    average_color = np.zeros(3, dtype=float)
-    for index in indices:
-        color = point_colors[index] * 255  # rgb
-        average_color += color
-    average_color /= point_amount
-    return average_color
 
 #Draws simple shapes to mark road markings     
 class SimpleMarkOperator(bpy.types.Operator):
@@ -1069,8 +970,6 @@ class TriangleMarkOperator(bpy.types.Operator):
         print("Operator was properly cancelled")  # Debug message
         return {'CANCELLED'}
 
-
-
 class RectangleMarkOperator(bpy.types.Operator):
     bl_idname = "custom.mark_rectangle"
     bl_label = "Mark Rectangle"
@@ -1213,7 +1112,6 @@ class CurvedLineMarkOperator(bpy.types.Operator):
         CurvedLineMarkOperator._is_running = False
         print("Operator was properly cancelled")
         return {'CANCELLED'}
-
     
 def draw_line(self, context, event):
 
@@ -1273,7 +1171,6 @@ def draw_line(self, context, event):
     #Update the previous end point to be the current one for the next click
     self.prev_end_point = coord_3d_end
     
-
 def snap_to_road_mark(self, context, first_click_point, last_click_point, click_to_correct):
     
     intensity_threshold = context.scene.intensity_threshold
@@ -1485,7 +1382,6 @@ class AutoCurvedLineOperator(bpy.types.Operator):
 
                 print("Region growing completed", time.time()-start_time)
                 
-            
             else:
                 print("no road markings found")
                 
@@ -1493,7 +1389,6 @@ class AutoCurvedLineOperator(bpy.types.Operator):
                 # Create a single mesh for the combined  rectangles
                 create_shape(rectangle_coords,shape_type="curved line")
                 
-        
         elif event.type == 'ESC':
             SimpleMarkOperator._is_running = False
             print("Operation was cancelled")
@@ -1501,7 +1396,6 @@ class AutoCurvedLineOperator(bpy.types.Operator):
 
         return {'PASS_THROUGH'}
 
-    
     def invoke(self, context, event):
         if SimpleMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
@@ -1600,6 +1494,33 @@ class FixedRectangleMarkOperator(bpy.types.Operator):
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}  
+        
+def get_average_intensity(indices):
+    # If indices is a NumPy array with more than one dimension, flatten it
+    if isinstance(indices, np.ndarray) and indices.ndim > 1:
+        indices = indices.flatten()
+
+    # If indices is a scalar, convert it to a list with a single element
+    if np.isscalar(indices):
+        indices = [indices]
+
+    total_intensity = 0.0
+    point_amount = len(indices)
+    for index in indices:
+        
+        intensity = np.average(point_colors[index]) * 255  
+        total_intensity += intensity
+
+    return total_intensity / point_amount
+
+def get_average_color(indices):
+    point_amount=len(indices)
+    average_color = np.zeros(3, dtype=float)
+    for index in indices:
+        color = point_colors[index] * 255  # rgb
+        average_color += color
+    average_color /= point_amount
+    return average_color
 
 def create_flexible_triangle(coords):
     # Convert coords to numpy array for efficient operations
@@ -1628,32 +1549,6 @@ def create_flexible_triangle(coords):
 
     return [vertex1.tolist(), vertex2.tolist(), third_vertex.tolist()]
 
-def create_triangle_outline(vertices):
-    # Create a new mesh and object for the triangle outline
-    mesh = bpy.data.meshes.new(name="TriangleOutline")
-    obj = bpy.data.objects.new("TriangleOutline", mesh)
-
-    # Link the object to the scene
-    bpy.context.collection.objects.link(obj)
-    bpy.context.view_layer.objects.active = obj
-    obj.select_set(True)
-
-    # Define edges for the triangle outline
-    edges = [(0, 1), (1, 2), (2, 0)]
-
-    # Create the mesh data
-    mesh.from_pydata(vertices, edges, [])  # No faces
-    mesh.update()
-
-    # Ensure the object scale is applied
-    bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    
-    '''wireframe_modifier = obj.modifiers.new(name="Wireframe", type='WIREFRAME')
-    wireframe_modifier.thickness = 0.1 # Adjust this value for desired thickness'''
-    
-    return obj
-
 def create_flexible_rectangle(coords):
     
     hull = ConvexHull(coords)
@@ -1664,39 +1559,6 @@ def create_flexible_rectangle(coords):
     east = max(vertices, key=lambda p: p[0])
     west = min(vertices, key=lambda p: p[0])
     return [north, east, south, west]
-
-
-
-def create_curved_line(coords):
-    
-    coords_np = np.array(coords)
-    
-    # Calculate the centroid
-    centroid = np.mean(coords_np, axis=0)
-    
-    # Sort points by x for interpolation
-    sorted_points = coords_np[np.argsort(coords_np[:, 0])]
-    
-    # Determine the top and bottom points
-    top_points = sorted_points[sorted_points[:, 1] > centroid[1]]
-    bottom_points = sorted_points[sorted_points[:, 1] <= centroid[1]]
-    
-    # Create cubic spline interpolations
-    top_spline = CubicSpline(top_points[:, 0], top_points[:, 1])
-    bottom_spline = CubicSpline(bottom_points[:, 0], bottom_points[:, 1])
-    
-    # Sample points from the spline
-    x_vals = np.linspace(np.min(coords_np[:, 0]), np.max(coords_np[:, 0]), len(coords_np))
-    top_y_vals = top_spline(x_vals)
-    bottom_y_vals = bottom_spline(x_vals)
-    
-    # Combine the top and bottom points to get the final shape
-    rectangle_coords = np.column_stack((x_vals, top_y_vals))
-    rectangle_coords = np.vstack((rectangle_coords, np.column_stack((x_vals[::-1], bottom_y_vals[::-1]))))
-    
-    return rectangle_coords.tolist()
-
-
 
 def create_fixed_triangle(context, location, size=1.0):
     global objects_z_height
@@ -1766,81 +1628,7 @@ def create_fixed_square(context, location, size=1.0):
     mat.diffuse_color = (1, 0, 0, 1)  # Red color with full opacity
     obj.data.materials.append(mat)
     
-
-    
-def create_fixed_length_segments(points, segment_length=1.0):
-    # function generates points on a polyline with fixed segment lengths
-    extended_points = [Vector(points[0])]  # Start with the first point
-    total_distance = 0  # Keep track of the total distance
-    segment_count = 0  # Count the number of full segments
-
-    for i in range(1, len(points)):
-        start_point = Vector(points[i - 1])
-        end_point = Vector(points[i])
-        segment_vector = end_point - start_point
-        segment_distance = segment_vector.length
-        total_distance += segment_distance
-
-        # Normalize the segment vector
-        segment_vector.normalize()
-
-        # Generate points at fixed intervals between start and end
-        while segment_distance > segment_length:
-            new_point = start_point + segment_vector * segment_length
-            extended_points.append(new_point)
-            start_point = new_point
-            segment_distance -= segment_length
-            segment_count += 1
-
-        # Add the last point if it doesn't fit a full segment
-        if segment_distance > 0:
-            extended_points.append(end_point)
-
-    # Adjust the last segment if it's not a full segment
-    if total_distance % segment_length != 0:
-        extended_points[-1] = extended_points[-2] + segment_vector * (total_distance % segment_length)
-
-    return extended_points, total_distance, segment_count + 1  # Include the last partial segment
-
-def find_middle_points(top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right):
-  
-    # Calculate the middle point between top_left and bottom_left
-    middle_left = [(top_left[i] + bottom_left[i]) / 2 for i in range(len(top_left))]
-    # Calculate the middle point between highest_top and lowest_bottom
-    middle_curve = [(highest_top[i] + lowest_bottom[i]) / 2 for i in range(len(highest_top))]
-    # Calculate the middle point between top_right and bottom_right
-    middle_right = [(top_right[i] + bottom_right[i]) / 2 for i in range(len(top_right))]
-    
-    mark_point(middle_left,"middle_left")
-    mark_point(middle_curve,"middle_curve")
-    mark_point(middle_right,"middle_right")
-    return middle_left, middle_curve, middle_right
-
-def find_middle_points2(top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right):
-    # Calculate middle points
-    middle_top = (top_left + top_right) / 2
-    middle_bottom = (bottom_left + bottom_right) / 2
-    middle_curve = (highest_top + lowest_bottom) / 2
-
-    # Calculate 25% and 75% points for top and bottom lines
-    quarter_top = top_left + 0.25 * (top_right - top_left)
-    three_quarter_top = top_left + 0.75 * (top_right - top_left)
-    quarter_bottom = bottom_left + 0.25 * (bottom_right - bottom_left)
-    three_quarter_bottom = bottom_left + 0.75 * (bottom_right - bottom_left)
-    
-    mark_point(middle_bottom,"middle_left")
-    mark_point(middle_curve,"middle_curve")
-    mark_point(middle_top,"middle_right")
-    
-    mark_point(quarter_top,"quarter_top")
-    mark_point(three_quarter_top,"three_quarter_top")
-    mark_point(quarter_bottom,"quarter_bottom")
-    mark_point(three_quarter_bottom,"three_quarter_bottom")
-
-    return [top_left, quarter_top, middle_top, three_quarter_top, top_right, 
-            middle_curve, 
-            bottom_right, three_quarter_bottom, middle_bottom, quarter_bottom, bottom_left]
-            
+   
 def create_polyline(name, points, width=0.01, color=(1, 0, 0, 1)):
     # Create a new curve data object
     curve_data = bpy.data.curves.new(name, type='CURVE')
@@ -1869,78 +1657,6 @@ def create_polyline(name, points, width=0.01, color=(1, 0, 0, 1)):
 
     return curve_obj
 
-def create_polyline2(name, points, width=0.01, color=(1, 0, 0, 1)):
-    # Create a new curve data object
-    curve_data = bpy.data.curves.new(name, type='CURVE')
-    curve_data.dimensions = '3D'
-
-    # Create a new spline in the curve
-    spline = curve_data.splines.new('BEZIER')
-    spline.bezier_points.add(len(points) - 1)  # The new spline has no points by default, add them
-
-    # Assign the points to the spline and handle types
-    for i, point in enumerate(points):
-        bp = spline.bezier_points[i]
-        bp.co = point
-        bp.handle_left_type = 'AUTO'
-        bp.handle_right_type = 'AUTO'
-
-    # Create a new object with the curve
-    curve_obj = bpy.data.objects.new(name, curve_data)
-    bpy.context.collection.objects.link(curve_obj)
-
-    # Set the curve to use a full path and set the bevel depth for width
-    curve_data.use_path = True
-    curve_data.bevel_depth = width
-
-    # Create a new material with the given color
-    mat = bpy.data.materials.new(name + "_Mat")
-    mat.diffuse_color = color
-    curve_obj.data.materials.append(mat)
-
-    return curve_obj
-
-def create_polyline3(name,points, width=0.01, color=(1, 0, 0, 1)):
-    # Create a new curve data object
-    curve_data = bpy.data.curves.new(name, type='CURVE')
-    curve_data.dimensions = '3D'
-
-    # Create a new spline in the curve
-    spline = curve_data.splines.new('BEZIER')
-    spline.bezier_points.add(2)  # We need exactly three points for the Bezier spline
-
-    # Assign the points to the spline. The handles will be automatically calculated.
-    spline.bezier_points[0].co = points[0]
-    spline.bezier_points[0].handle_left_type = 'AUTO'
-    spline.bezier_points[0].handle_right_type = 'AUTO'
-
-    spline.bezier_points[1].co = points[1]
-    spline.bezier_points[1].handle_left_type = 'AUTO'
-    spline.bezier_points[1].handle_right_type = 'AUTO'
-
-    spline.bezier_points[2].co = points[2]
-    spline.bezier_points[2].handle_left_type = 'AUTO'
-    spline.bezier_points[2].handle_right_type = 'AUTO'
-
-    # Create a new object with the curve
-    curve_obj = bpy.data.objects.new(name, curve_data)
-    bpy.context.collection.objects.link(curve_obj)
-
-    # Set the curve to use a full path and set the bevel depth for width
-    curve_data.bevel_depth = width
-
-    # Create a new material with the given color
-    mat = bpy.data.materials.new(name + "_Mat")
-    mat.diffuse_color = color
-    curve_obj.data.materials.append(mat)
-
-    # Ensure the curve data is updated with the new information
-    #curve_data.update()
-
-    return curve_obj
-
-
-
 #Define a function to create a single mesh for combined rectangles
 def create_shape(coords_list, shape_type):
     
@@ -1948,8 +1664,8 @@ def create_shape(coords_list, shape_type):
     marking_color = bpy.context.scene.marking_color 
     transparency = bpy.context.scene.marking_transparency
     line_width = context.scene.fatline_width
-    
     shape_coords = None  # Default to original coordinates
+    
     if shape_type == "triangle":
         print("Drawing triangle")
         shape_coords = create_flexible_triangle(coords_list)
@@ -1958,21 +1674,28 @@ def create_shape(coords_list, shape_type):
             marking_color, transparency)
         vertices=create_flexible_triangle(coords_list)
         obj=create_triangle_outline(vertices)
+        
     elif shape_type == "rectangle":
         print("Drawing rectangle")
         shape_coords = create_flexible_rectangle(coords_list)
         obj=create_mesh_with_material(
             "rectangle Shape", shape_coords,
             marking_color, transparency)
+        
     elif shape_type == "curved line":
         print("Drawing curved line")
-        top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right = find_extreme_points(coords_list)      
-        middle_points = find_middle_points(top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right)
+        middle_points = find_extreme_points2(coords_list)
         fixed_length_points, total_length, segments = create_fixed_length_segments(middle_points)
         print(f"Total line length: {total_length:.2f} meters")
         print(f"Segmented lines drawn: {segments}")
 
         obj=create_polyline("CurvedLine", fixed_length_points, width=line_width, color=(marking_color[0], marking_color[1], marking_color[2], transparency))
+   
+    else:
+        print("Drawing unkown Shape")
+        obj=create_mesh_with_material(
+            "Unkown Shape", coords_list,
+            marking_color, transparency)
         
     store_object_state(obj)
     print(f"Rendered {shape_type} shape in: {time.time() - start_time:.2f} seconds")
@@ -2012,6 +1735,76 @@ def create_mesh_with_material(obj_name, shape_coords, marking_color, transparenc
     principled_node.inputs['Alpha'].default_value = transparency
 
     obj.data.materials.append(mat)
+
+    return obj
+
+#Function to create a colored, resizable line object on top of the line      
+def create_rectangle_object(start, end):
+    
+    context = bpy.context
+    marking_color = context.scene.marking_color
+    transparency = context.scene.marking_transparency
+    global objects_z_height
+    width = context.scene.fatline_width
+    # Calculate the direction vector and its length
+    direction = end - start
+    length = direction.length
+
+    direction.normalize()
+
+    # Calculate the rectangle's width
+    orthogonal = direction.cross(Vector((0, 0, 1)))
+    orthogonal.normalize()
+    orthogonal *= width / 2
+
+    # Calculate the rectangle's vertices with an increase in the z-axis by objects_z_height
+    v1 = start + orthogonal + Vector((0, 0, objects_z_height))
+    v2 = start - orthogonal + Vector((0, 0, objects_z_height))
+    v3 = end - orthogonal + Vector((0, 0, objects_z_height))
+    v4 = end + orthogonal + Vector((0, 0, objects_z_height))
+
+    # Create a new mesh object for the rectangle
+    mesh = bpy.data.meshes.new(name="Rectangle Mesh")
+    obj = bpy.data.objects.new("Rectangle Line", mesh)
+
+    # Link it to the scene
+    bpy.context.collection.objects.link(obj)
+
+    # Create mesh from python data
+    bm = bmesh.new()
+
+    # Add vertices
+    bmesh.ops.create_vert(bm, co=v1)
+    bmesh.ops.create_vert(bm, co=v2)
+    bmesh.ops.create_vert(bm, co=v3)
+    bmesh.ops.create_vert(bm, co=v4)
+
+    # Add faces
+    bm.faces.new(bm.verts)
+
+    # Update and free bmesh to reduce memory usage
+    bm.to_mesh(mesh)
+    bm.free()
+
+    # Create a material for the rectangle and set its color
+    material = bpy.data.materials.new(name="Rectangle Material")
+    
+    # Set the color with alpha for transparency
+    material.diffuse_color = (marking_color[0], marking_color[1], marking_color[2], transparency)
+
+    # Adjust the material settings to enable transparency
+    material.use_nodes = True
+    material.blend_method = 'BLEND'  # Use alpha blend mode
+
+    # Set the Principled BSDF shader's alpha value
+    principled_bsdf = next(node for node in material.node_tree.nodes if node.type == 'BSDF_PRINCIPLED')
+    principled_bsdf.inputs['Alpha'].default_value = transparency
+    
+    # Assign the material to the object
+    obj.data.materials.append(material)
+
+    # After the object is created, store it 
+    store_object_state(obj)
 
     return obj
 
@@ -2179,7 +1972,6 @@ def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
 
     return shape
 
-
 def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=25):
     
     #DBSCAN clustering
@@ -2200,25 +1992,7 @@ def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=25):
     print(f"Points have been filtered. Original amount: {original_count}, Removed: {removed_count}")
 
     return filtered_coords
- 
-
-def mark_point(point, name="point", size=0.1):
-    # Create a cube to mark the point
-    bpy.ops.mesh.primitive_cube_add(size=size, location=point)
-    marker = bpy.context.active_object
-    marker.name = name
-    
-    # Create a new material with the specified color
-    mat = bpy.data.materials.new(name="MarkerMaterial")
-    mat.diffuse_color = (1.0, 0.0, 0.0, 1.0)  # Red color
-    mat.use_nodes = False  
-
-    # Assign it to the cube
-    if len(marker.data.materials):
-        marker.data.materials[0] = mat
-    else:
-        marker.data.materials.append(mat)
-                     
+                 
 #Operator to remove all drawn markings from the scene collection
 class RemoveAllMarkingsOperator(bpy.types.Operator):
     bl_idname = "custom.remove_all_markings"
@@ -2349,7 +2123,6 @@ class OBJECT_OT_simple_undo(bpy.types.Operator):
                     redo_stack.append(obj_state)
         return {'FINISHED'}
         
-
 class OBJECT_OT_simple_redo(bpy.types.Operator):
     bl_idname = "object.simple_redo"
     bl_label = "Simple Redo"
@@ -2372,8 +2145,7 @@ class OBJECT_OT_simple_redo(bpy.types.Operator):
             obj.update_tag()
             
         return {'FINISHED'}
-
-    
+   
 def store_object_state(obj):
     
     # Storing object state
@@ -2388,8 +2160,7 @@ def store_object_state(obj):
     undo_stack.append(obj_state) 
     # Clear the redo stack
     redo_stack.clear()  
-
-        
+    
 # Panel for the Road Marking Digitizer
 class DIGITIZE_PT_Panel(bpy.types.Panel):
     bl_label = "Road Marking Digitizer"
@@ -2535,8 +2306,7 @@ def register():
     bpy.utils.register_class(FindALlRoadMarkingsOperator)
     bpy.utils.register_class(OBJECT_OT_simple_undo)
     bpy.utils.register_class(OBJECT_OT_simple_redo)
-  
-                                      
+                                     
 def unregister():
     
     bpy.utils.unregister_class(LAS_OT_OpenOperator) 
@@ -2582,21 +2352,7 @@ if __name__ == "__main__":
         
         
         
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
+     
         
 def uninstall_libraries(library_list):
     for library in library_list:
@@ -2605,8 +2361,7 @@ def uninstall_libraries(library_list):
             print(f"Successfully uninstall {library}")
         except subprocess.CalledProcessError as e:
             print(f"Error uninstall {library}: {e}")         
-        
-          
+                 
 #Checks whether the mouseclick happened in the viewport or elsewhere    
 def is_mouse_in_3d_view(context, event):
     
@@ -2717,8 +2472,7 @@ class DrawStraightLineOperator(bpy.types.Operator):
             context.view_layer.objects.active = context.object
             context.object.select_set(True)
             bpy.ops.object.delete()
-                            
-        
+                                 
 def draw_polyline_from_points(points, name, color=(0.8, 0.3, 0.3), thickness=0.02):
     # Create a new curve and a new object using that curve
     curve_data = bpy.data.curves.new(name=name, type='CURVE')
@@ -2742,7 +2496,6 @@ def draw_polyline_from_points(points, name, color=(0.8, 0.3, 0.3), thickness=0.0
     material = bpy.data.materials.new(name=name + "Material")
     material.diffuse_color = (*color, 1)  # RGB + Alpha
     curve_object.data.materials.append(material)
-
 
 def get_principal_component(points):
     # Compute the centroid of the points
@@ -2787,39 +2540,23 @@ def align_shapes(original_coords, perfect_coords):
 
     return matched_vertices
 
-
-def find_extreme_points(coords_list):
-    # Convert list to numpy array for easier manipulation
-    coords_np = np.array(coords_list)
-
-    # Separate the coordinates into x, y, z
-    coords_x = coords_np[:, 0]
-    coords_y = coords_np[:, 1]
-    coords_z = coords_np[:, 2]
-
-    # Create a mask for top half points based on the median y-value
-    top_mask = coords_y >= np.median(coords_y)
-
-    # Use the mask to separate the points
-    top_half = coords_np[top_mask]
-    bottom_half = coords_np[~top_mask]
-
-    #  find the extreme points using all 3D coordinates
-    bottom_right = top_half[np.argmin(top_half[:, 0])]
-    highest_top= top_half[np.argmax(top_half[:, 0])]
-    top_right= top_half[np.argmax(top_half[:, 1])]
+def mark_point(point, name="point", size=0.05):
+    # Create a cube to mark the point
+    bpy.ops.mesh.primitive_cube_add(size=size, location=point)
+    marker = bpy.context.active_object
+    marker.name = name
     
-    lowest_bottom= bottom_half[np.argmin(bottom_half[:, 0])]
-    top_left= bottom_half[np.argmax(bottom_half[:, 0])]
-    bottom_left= bottom_half[np.argmin(bottom_half[:, 1])]
-    
-    extreme_points=top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right
-    extreme_point_names="top_left", "bottom_left", "highest_top", "lowest_bottom", "top_right", "bottom_right"
-    for i, point in enumerate(extreme_points):
-        mark_point(point, extreme_point_names[i])
-    return top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right
+    # Create a new material with the specified color
+    mat = bpy.data.materials.new(name="MarkerMaterial")
+    mat.diffuse_color = (1.0, 0.0, 0.0, 1.0)  # Red color
+    mat.use_nodes = False  
 
-
+    # Assign it to the cube
+    if len(marker.data.materials):
+        marker.data.materials[0] = mat
+    else:
+        marker.data.materials.append(mat)
+        
 # Ensure that the lines are not parallel by adding a small value to the denominator
 def perpendicular_bisector_from_line(start, end):
     midpoint = (start + end) / 2
@@ -3001,6 +2738,7 @@ def draw_curved_line_shape(top_left, top_right, highest_top, bottom_left, bottom
     # After the object is created, store it 
    
     print("rendered curved line shape in: ", time.time() - start_time)
+
 def draw_curved_line_shape2(top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom):
     
     start_time = time.time()
@@ -3103,7 +2841,6 @@ def draw_curved_line_shape2(top_left, top_right, highest_top, bottom_left, botto
     store_object_state(obj)
     print("rendered curved line shape in: ", time.time()-start_time)
     
-
 def create_bezier_spline_from_points(curveData, point1, point2, point3):
     # Create a new spline in that curve
     spline = curveData.splines.new(type='BEZIER')
@@ -3412,7 +3149,6 @@ def calculate_curved_line(top_left, top_right, highest_top, bottom_left, bottom_
     draw_polyline_from_points(arc_points_bottom, "BottomArc", color=(0, 1, 0))  
     #return curved_rectangle_points
 
-
 def visualize_search_radius(location, search_radius, name="SearchRadius"):
     # Check if the mesh already exists. If it does, remove it.
     if name in bpy.data.objects:
@@ -3451,8 +3187,139 @@ def visualize_search_radius(location, search_radius, name="SearchRadius"):
 
     return obj
 
+def create_fixed_length_segments(points, segment_length=1.0):
+    # function generates points on a polyline with fixed segment lengths
+    extended_points = [Vector(points[0])]  # Start with the first point
+    total_distance = 0  # Keep track of the total distance
+    segment_count = 0  # Count the number of full segments
 
+    for i in range(1, len(points)):
+        start_point = Vector(points[i - 1])
+        end_point = Vector(points[i])
+        segment_vector = end_point - start_point
+        segment_distance = segment_vector.length
+        total_distance += segment_distance
+
+        # Normalize the segment vector
+        segment_vector.normalize()
+
+        # Generate points at fixed intervals between start and end
+        while segment_distance > segment_length:
+            new_point = start_point + segment_vector * segment_length
+            extended_points.append(new_point)
+            start_point = new_point
+            segment_distance -= segment_length
+            segment_count += 1
+
+        # Add the last point if it doesn't fit a full segment
+        if segment_distance > 0:
+            extended_points.append(end_point)
+
+    # Adjust the last segment if it's not a full segment
+    if total_distance % segment_length != 0:
+        extended_points[-1] = extended_points[-2] + segment_vector * (total_distance % segment_length)
+
+    return extended_points, total_distance, segment_count + 1  # Include the last partial segment
+
+def create_curved_line(coords):
     
+    coords_np = np.array(coords)
+    
+    # Calculate the centroid
+    centroid = np.mean(coords_np, axis=0)
+    
+    # Sort points by x for interpolation
+    sorted_points = coords_np[np.argsort(coords_np[:, 0])]
+    
+    # Determine the top and bottom points
+    top_points = sorted_points[sorted_points[:, 1] > centroid[1]]
+    bottom_points = sorted_points[sorted_points[:, 1] <= centroid[1]]
+    
+    # Create cubic spline interpolations
+    top_spline = CubicSpline(top_points[:, 0], top_points[:, 1])
+    bottom_spline = CubicSpline(bottom_points[:, 0], bottom_points[:, 1])
+    
+    # Sample points from the spline
+    x_vals = np.linspace(np.min(coords_np[:, 0]), np.max(coords_np[:, 0]), len(coords_np))
+    top_y_vals = top_spline(x_vals)
+    bottom_y_vals = bottom_spline(x_vals)
+    
+    # Combine the top and bottom points to get the final shape
+    rectangle_coords = np.column_stack((x_vals, top_y_vals))
+    rectangle_coords = np.vstack((rectangle_coords, np.column_stack((x_vals[::-1], bottom_y_vals[::-1]))))
+    
+    return rectangle_coords.tolist()
+
+def create_polyline2(name, points, width=0.01, color=(1, 0, 0, 1)):
+    # Create a new curve data object
+    curve_data = bpy.data.curves.new(name, type='CURVE')
+    curve_data.dimensions = '3D'
+
+    # Create a new spline in the curve
+    spline = curve_data.splines.new('BEZIER')
+    spline.bezier_points.add(len(points) - 1)  # The new spline has no points by default, add them
+
+    # Assign the points to the spline and handle types
+    for i, point in enumerate(points):
+        bp = spline.bezier_points[i]
+        bp.co = point
+        bp.handle_left_type = 'AUTO'
+        bp.handle_right_type = 'AUTO'
+
+    # Create a new object with the curve
+    curve_obj = bpy.data.objects.new(name, curve_data)
+    bpy.context.collection.objects.link(curve_obj)
+
+    # Set the curve to use a full path and set the bevel depth for width
+    curve_data.use_path = True
+    curve_data.bevel_depth = width
+
+    # Create a new material with the given color
+    mat = bpy.data.materials.new(name + "_Mat")
+    mat.diffuse_color = color
+    curve_obj.data.materials.append(mat)
+
+    return curve_obj
+
+def create_polyline3(name,points, width=0.01, color=(1, 0, 0, 1)):
+    # Create a new curve data object
+    curve_data = bpy.data.curves.new(name, type='CURVE')
+    curve_data.dimensions = '3D'
+
+    # Create a new spline in the curve
+    spline = curve_data.splines.new('BEZIER')
+    spline.bezier_points.add(2)  # We need exactly three points for the Bezier spline
+
+    # Assign the points to the spline. The handles will be automatically calculated.
+    spline.bezier_points[0].co = points[0]
+    spline.bezier_points[0].handle_left_type = 'AUTO'
+    spline.bezier_points[0].handle_right_type = 'AUTO'
+
+    spline.bezier_points[1].co = points[1]
+    spline.bezier_points[1].handle_left_type = 'AUTO'
+    spline.bezier_points[1].handle_right_type = 'AUTO'
+
+    spline.bezier_points[2].co = points[2]
+    spline.bezier_points[2].handle_left_type = 'AUTO'
+    spline.bezier_points[2].handle_right_type = 'AUTO'
+
+    # Create a new object with the curve
+    curve_obj = bpy.data.objects.new(name, curve_data)
+    bpy.context.collection.objects.link(curve_obj)
+
+    # Set the curve to use a full path and set the bevel depth for width
+    curve_data.bevel_depth = width
+
+    # Create a new material with the given color
+    mat = bpy.data.materials.new(name + "_Mat")
+    mat.diffuse_color = color
+    curve_obj.data.materials.append(mat)
+
+    # Ensure the curve data is updated with the new information
+    #curve_data.update()
+
+    return curve_obj
+   
 def is_click_on_white(self, context, location):
     global points_kdtree, point_colors
     intensity_threshold = context.scene.intensity_threshold
@@ -3473,5 +3340,207 @@ def is_click_on_white(self, context, location):
     else:
         print("Intensity threshold not met")
         return False
+    
+def create_triangle_outline(vertices):
+    # Create a new mesh and object for the triangle outline
+    mesh = bpy.data.meshes.new(name="TriangleOutline")
+    obj = bpy.data.objects.new("TriangleOutline", mesh)
 
+    # Link the object to the scene
+    bpy.context.collection.objects.link(obj)
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
 
+    # Define edges for the triangle outline
+    edges = [(0, 1), (1, 2), (2, 0)]
+
+    # Create the mesh data
+    mesh.from_pydata(vertices, edges, [])  # No faces
+    mesh.update()
+
+    # Ensure the object scale is applied
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    
+    '''wireframe_modifier = obj.modifiers.new(name="Wireframe", type='WIREFRAME')
+    wireframe_modifier.thickness = 0.1 # Adjust this value for desired thickness'''
+    
+    return obj
+
+def find_extreme_points(coords_list):
+    # Convert list to numpy array for easier manipulation
+    coords_np = np.array(coords_list)
+
+    # Separate the coordinates into x, y, z
+    coords_x = coords_np[:, 0]
+    coords_y = coords_np[:, 1]
+    coords_z = coords_np[:, 2]
+
+    # Create a mask for top half points based on the median y-value
+    top_mask = coords_y >= np.median(coords_y)
+
+    # Use the mask to separate the points
+    top_half = coords_np[top_mask]
+    bottom_half = coords_np[~top_mask]
+
+    #  find the extreme points using all 3D coordinates
+    bottom_right = top_half[np.argmin(top_half[:, 0])]
+    highest_top= top_half[np.argmax(top_half[:, 0])]
+    top_right= top_half[np.argmax(top_half[:, 1])]
+    
+    lowest_bottom= bottom_half[np.argmin(bottom_half[:, 0])]
+    top_left= bottom_half[np.argmax(bottom_half[:, 0])]
+    bottom_left= bottom_half[np.argmin(bottom_half[:, 1])]
+    
+    extreme_points=top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right
+    extreme_point_names="top_left", "bottom_left", "highest_top", "lowest_bottom", "top_right", "bottom_right"
+    for i, point in enumerate(extreme_points):
+        mark_point(point, extreme_point_names[i])
+    return top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right
+
+def find_middle_points_recursive(coords_list, num_segments):
+    def recursive_find(coords, start, end, num_segments, middle_points):
+        if num_segments <= 1:
+            return
+
+        segment_length = (end - start) / num_segments
+        for i in range(1, num_segments):
+            segment_end = int(start + i * segment_length)
+            segment = coords[start:segment_end]
+
+            # Find local max and min in this segment
+            local_max = max(segment, key=lambda p: p[1])  # Assuming y-coordinate for max
+            local_min = min(segment, key=lambda p: p[1])  # Assuming y-coordinate for min
+
+            # Calculate middle point between local max and min
+            middle_point = [(local_max[i] + local_min[i]) / 2 for i in range(len(local_max))]
+            middle_points.add(tuple(middle_point))  # Add as tuple to prevent duplicates
+
+            # Recursive call for each half of the segment
+            recursive_find(coords, start, segment_end, num_segments // 2, middle_points)
+            recursive_find(coords, segment_end, end, num_segments // 2, middle_points)
+            
+            mark_point(local_min,"local_min",0.05)
+            mark_point(local_max,"local_max",0.05)
+            mark_point(middle_point,"middle_point",0.05)
+
+    middle_points = set()
+    sorted_coords = sorted(coords_list, key=lambda p: p[0])  # Sort by x-coordinate
+    recursive_find(sorted_coords, 0, len(sorted_coords), num_segments, middle_points)
+
+    return list(middle_points)
+
+def find_middle_points1(top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right):
+  
+    # Calculate the middle point between top_left and bottom_left
+    middle_left = [(top_left[i] + bottom_left[i]) / 2 for i in range(len(top_left))]
+    # Calculate the middle point between highest_top and lowest_bottom
+    middle_curve = [(highest_top[i] + lowest_bottom[i]) / 2 for i in range(len(highest_top))]
+    # Calculate the middle point between top_right and bottom_right
+    middle_right = [(top_right[i] + bottom_right[i]) / 2 for i in range(len(top_right))]
+    
+    mark_point(middle_left,"middle_left")
+    mark_point(middle_curve,"middle_curve")
+    mark_point(middle_right,"middle_right")
+    return middle_left, middle_curve, middle_right
+
+def find_middle_points3(extreme_points):
+        
+    # Calculate the middle point between top_left and bottom_left
+    middle_left = [(top_left[i] + bottom_left[i]) / 2 for i in range(len(top_left))]
+    # Calculate the middle point between highest_top and lowest_bottom
+    middle_curve = [(highest_top[i] + lowest_bottom[i]) / 2 for i in range(len(highest_top))]
+    # Calculate the middle point between top_right and bottom_right
+    middle_right = [(top_right[i] + bottom_right[i]) / 2 for i in range(len(top_right))]
+    
+    mark_point(middle_left,"middle_left")
+    mark_point(middle_curve,"middle_curve")
+    mark_point(middle_right,"middle_right")
+    return middle_left, middle_curve, middle_right
+
+def find_middle_points2(top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right):
+    # Calculate middle points
+    middle_top = (top_left + top_right) / 2
+    middle_bottom = (bottom_left + bottom_right) / 2
+    middle_curve = (highest_top + lowest_bottom) / 2
+
+    # Calculate 25% and 75% points for top and bottom lines
+    quarter_top = top_left + 0.25 * (top_right - top_left)
+    three_quarter_top = top_left + 0.75 * (top_right - top_left)
+    quarter_bottom = bottom_left + 0.25 * (bottom_right - bottom_left)
+    three_quarter_bottom = bottom_left + 0.75 * (bottom_right - bottom_left)
+    
+    mark_point(middle_bottom,"middle_left")
+    mark_point(middle_curve,"middle_curve")
+    mark_point(middle_top,"middle_right")
+    
+    mark_point(quarter_top,"quarter_top")
+    mark_point(three_quarter_top,"three_quarter_top")
+    mark_point(quarter_bottom,"quarter_bottom")
+    mark_point(three_quarter_bottom,"three_quarter_bottom")
+
+    return [top_left, quarter_top, middle_top, three_quarter_top, top_right, 
+            middle_curve, 
+            bottom_right, three_quarter_bottom, middle_bottom, quarter_bottom, bottom_left]
+
+def find_middle_of_extreme_points(coords_list, num_pairs=6):
+    # Helper function to find new extreme point
+    def find_new_extreme_point(point1, point2, coords_np):
+        filtered_points = coords_np[(coords_np[:, 0] > min(point1[0], point2[0])) & (coords_np[:, 0] < max(point1[0], point2[0]))]
+        if filtered_points.size == 0:
+            return None
+        max_deviation_index = np.argmax(np.abs(filtered_points[:, 1] - np.mean([point1[1], point2[1]])))
+        return filtered_points[max_deviation_index]
+
+    # Initial extreme points
+    coords_np = np.array(coords_list)
+    leftmost_point = coords_np[np.argmin(coords_np[:, 0])]
+    rightmost_point = coords_np[np.argmax(coords_np[:, 0])]
+    extreme_points = [leftmost_point, rightmost_point]
+
+    # Finding extreme points
+    while len(extreme_points) < num_pairs * 2:
+        new_points = []
+        for i in range(len(extreme_points) - 1):
+            new_point = find_new_extreme_point(extreme_points[i], extreme_points[i + 1], coords_np)
+            if new_point is not None:
+                new_points.append(new_point)
+        new_points.sort(key=lambda p: p[0])
+        extreme_points.extend(new_points)
+        extreme_points.sort(key=lambda p: p[0])
+
+    # Pairing and finding middle points
+    middle_points = []
+    for i in range(0, len(extreme_points), 2):
+        pair_midpoint = (extreme_points[i] + extreme_points[i + 1]) / 2
+        middle_points.append(pair_midpoint)
+
+    return middle_points
+
+def find_extreme_points2(coords_list):
+    
+    coords_np = np.array(coords_list)
+    coords_x = coords_np[:, 0]
+    coords_y = coords_np[:, 1]
+
+    top_mask = coords_y >= np.median(coords_y)
+    top_half = coords_np[top_mask]
+    bottom_half = coords_np[~top_mask]
+
+    # Sort points by x-coordinate
+    top_half_sorted = top_half[np.argsort(top_half[:, 0])]
+    bottom_half_sorted = bottom_half[np.argsort(bottom_half[:, 0])]
+
+    # Pair points from top and bottom halves
+    pairs = []
+    for top_point, bottom_point in zip(top_half_sorted, bottom_half_sorted):
+        pairs.append((top_point, bottom_point))
+    
+    middle_points = []
+    for top_point, bottom_point in pairs:
+        middle_point = (top_point + bottom_point) / 2
+        middle_points.append(middle_point)
+        mark_point(middle_point, "middle_point")
+
+    return middle_points
+    
