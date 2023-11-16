@@ -938,7 +938,7 @@ class TriangleMarkOperator(bpy.types.Operator):
 
             if checked_indices:
                 points= [point_coords[i] for i in checked_indices]
-                points = filter_noise_with_dbscan(points, 0.06, 10)
+                points = filter_noise_with_dbscan(points)
                 self._processed_indices.update(checked_indices)
                 triangle_vertices = create_flexible_triangle(points)
                 self._triangles.append(triangle_vertices)
@@ -1665,7 +1665,7 @@ def create_shape(coords_list, shape_type):
     transparency = bpy.context.scene.marking_transparency
     line_width = context.scene.fatline_width
     shape_coords = None  # Default to original coordinates
-    
+    coords_list=filter_noise_with_dbscan(coords_list)
     if shape_type == "triangle":
         print("Drawing triangle")
         shape_coords = create_flexible_triangle(coords_list)
@@ -1684,7 +1684,8 @@ def create_shape(coords_list, shape_type):
         
     elif shape_type == "curved line":
         print("Drawing curved line")
-        middle_points = find_extreme_points3(coords_list)
+        middle_points = create_smoother_middle_points(coords_list)
+
         fixed_length_points, total_length, segments = create_fixed_length_segments(middle_points)
         print(f"Total line length: {total_length:.2f} meters")
         print(f"Segmented lines drawn: {segments}")
@@ -1700,14 +1701,7 @@ def create_shape(coords_list, shape_type):
     store_object_state(obj)
     print(f"Rendered {shape_type} shape in: {time.time() - start_time:.2f} seconds")
 
-def interpolate_middle_points(points, t):
 
-    new_points = []
-    for i in range(len(points) - 1):
-        start, end = points[i], points[i + 1]
-        interp_point = (1 - t) * np.array(start) + t * np.array(end)
-        new_points.append(interp_point.tolist())
-    return new_points
    
 def create_mesh_with_material(obj_name, shape_coords, marking_color, transparency):
     
@@ -1829,9 +1823,7 @@ def create_dots_shape(coords_list):
     max_gap = 10  # Maximum gap size to fill
 
     #filters out bad points
-    distance_between_cords = 0.06
-    required_surrounded_cords= 10
-    coords_list = filter_noise_with_dbscan(coords_list, distance_between_cords, required_surrounded_cords)
+    coords_list = filter_noise_with_dbscan(coords_list)
     
     # Sort the coordinates by distance
     coords_list.sort(key=lambda coords: (coords[0]**2 + coords[1]**2 + coords[2]**2)**0.5)
@@ -1972,7 +1964,7 @@ def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
 
     return shape
 
-def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=25):
+def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=20):
     
     #DBSCAN clustering
     db = DBSCAN(eps=eps, min_samples=min_samples).fit(coords_list)
@@ -2739,7 +2731,6 @@ def draw_curved_line_shape(top_left, top_right, highest_top, bottom_left, bottom
    
     print("rendered curved line shape in: ", time.time() - start_time)
 
-def draw_curved_line_shape2(top_left, top_right, highest_top, bottom_left, bottom_right, lowest_bottom):
     
     start_time = time.time()
     marking_color = bpy.context.scene.marking_color 
@@ -3250,38 +3241,6 @@ def create_curved_line(coords):
     
     return rectangle_coords.tolist()
 
-def create_polyline2(name, points, width=0.01, color=(1, 0, 0, 1)):
-    # Create a new curve data object
-    curve_data = bpy.data.curves.new(name, type='CURVE')
-    curve_data.dimensions = '3D'
-
-    # Create a new spline in the curve
-    spline = curve_data.splines.new('BEZIER')
-    spline.bezier_points.add(len(points) - 1)  # The new spline has no points by default, add them
-
-    # Assign the points to the spline and handle types
-    for i, point in enumerate(points):
-        bp = spline.bezier_points[i]
-        bp.co = point
-        bp.handle_left_type = 'AUTO'
-        bp.handle_right_type = 'AUTO'
-
-    # Create a new object with the curve
-    curve_obj = bpy.data.objects.new(name, curve_data)
-    bpy.context.collection.objects.link(curve_obj)
-
-    # Set the curve to use a full path and set the bevel depth for width
-    curve_data.use_path = True
-    curve_data.bevel_depth = width
-
-    # Create a new material with the given color
-    mat = bpy.data.materials.new(name + "_Mat")
-    mat.diffuse_color = color
-    curve_obj.data.materials.append(mat)
-
-    return curve_obj
-
-def create_polyline3(name,points, width=0.01, color=(1, 0, 0, 1)):
     # Create a new curve data object
     curve_data = bpy.data.curves.new(name, type='CURVE')
     curve_data.dimensions = '3D'
@@ -3367,7 +3326,6 @@ def create_triangle_outline(vertices):
     
     return obj
 
-def find_extreme_points(coords_list):
     # Convert list to numpy array for easier manipulation
     coords_np = np.array(coords_list)
 
@@ -3398,126 +3356,11 @@ def find_extreme_points(coords_list):
         mark_point(point, extreme_point_names[i])
     return top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right
 
-def find_middle_points4(coords_list, num_segments):
-    def recursive_find(coords, start, end, num_segments, middle_points):
-        if num_segments <= 1:
-            return
-
-        segment_length = (end - start) / num_segments
-        for i in range(1, num_segments):
-            segment_end = int(start + i * segment_length)
-            segment = coords[start:segment_end]
-
-            # Find local max and min in this segment
-            local_max = max(segment, key=lambda p: p[1])  # Assuming y-coordinate for max
-            local_min = min(segment, key=lambda p: p[1])  # Assuming y-coordinate for min
-
-            # Calculate middle point between local max and min
-            middle_point = [(local_max[i] + local_min[i]) / 2 for i in range(len(local_max))]
-            middle_points.add(tuple(middle_point))  # Add as tuple to prevent duplicates
-
-            # Recursive call for each half of the segment
-            recursive_find(coords, start, segment_end, num_segments // 2, middle_points)
-            recursive_find(coords, segment_end, end, num_segments // 2, middle_points)
-            
-            mark_point(local_min,"local_min",0.05)
-            mark_point(local_max,"local_max",0.05)
-            mark_point(middle_point,"middle_point",0.05)
-
-    middle_points = set()
-    sorted_coords = sorted(coords_list, key=lambda p: p[0])  # Sort by x-coordinate
-    recursive_find(sorted_coords, 0, len(sorted_coords), num_segments, middle_points)
-
-    return list(middle_points)
-
-def find_middle_points(top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right):
-  
-    # Calculate the middle point between top_left and bottom_left
-    middle_left = [(top_left[i] + bottom_left[i]) / 2 for i in range(len(top_left))]
-    # Calculate the middle point between highest_top and lowest_bottom
-    middle_curve = [(highest_top[i] + lowest_bottom[i]) / 2 for i in range(len(highest_top))]
-    # Calculate the middle point between top_right and bottom_right
-    middle_right = [(top_right[i] + bottom_right[i]) / 2 for i in range(len(top_right))]
-    
-    mark_point(middle_left,"middle_left")
-    mark_point(middle_curve,"middle_curve")
-    mark_point(middle_right,"middle_right")
-    return middle_left, middle_curve, middle_right
-
-def find_middle_points3(extreme_points):
-        
-    # Calculate the middle point between top_left and bottom_left
-    middle_left = [(top_left[i] + bottom_left[i]) / 2 for i in range(len(top_left))]
-    # Calculate the middle point between highest_top and lowest_bottom
-    middle_curve = [(highest_top[i] + lowest_bottom[i]) / 2 for i in range(len(highest_top))]
-    # Calculate the middle point between top_right and bottom_right
-    middle_right = [(top_right[i] + bottom_right[i]) / 2 for i in range(len(top_right))]
-    
-    mark_point(middle_left,"middle_left")
-    mark_point(middle_curve,"middle_curve")
-    mark_point(middle_right,"middle_right")
-    return middle_left, middle_curve, middle_right
-
-def find_middle_points2(top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right):
-    # Calculate middle points
-    middle_top = (top_left + top_right) / 2
-    middle_bottom = (bottom_left + bottom_right) / 2
-    middle_curve = (highest_top + lowest_bottom) / 2
-
-    # Calculate 25% and 75% points for top and bottom lines
-    quarter_top = top_left + 0.25 * (top_right - top_left)
-    three_quarter_top = top_left + 0.75 * (top_right - top_left)
-    quarter_bottom = bottom_left + 0.25 * (bottom_right - bottom_left)
-    three_quarter_bottom = bottom_left + 0.75 * (bottom_right - bottom_left)
-    
-    mark_point(middle_bottom,"middle_left")
-    mark_point(middle_curve,"middle_curve")
-    mark_point(middle_top,"middle_right")
-    
-    mark_point(quarter_top,"quarter_top")
-    mark_point(three_quarter_top,"three_quarter_top")
-    mark_point(quarter_bottom,"quarter_bottom")
-    mark_point(three_quarter_bottom,"three_quarter_bottom")
 
     return [top_left, quarter_top, middle_top, three_quarter_top, top_right, 
             middle_curve, 
             bottom_right, three_quarter_bottom, middle_bottom, quarter_bottom, bottom_left]
 
-def find_extreme_points2(coords_list, num_pairs=6):
-    # Helper function to find new extreme point
-    def find_new_extreme_point(point1, point2, coords_np):
-        filtered_points = coords_np[(coords_np[:, 0] > min(point1[0], point2[0])) & (coords_np[:, 0] < max(point1[0], point2[0]))]
-        if filtered_points.size == 0:
-            return None
-        max_deviation_index = np.argmax(np.abs(filtered_points[:, 1] - np.mean([point1[1], point2[1]])))
-        return filtered_points[max_deviation_index]
-
-    # Initial extreme points
-    coords_np = np.array(coords_list)
-    leftmost_point = coords_np[np.argmin(coords_np[:, 0])]
-    rightmost_point = coords_np[np.argmax(coords_np[:, 0])]
-    extreme_points = [leftmost_point, rightmost_point]
-
-    # Finding extreme points
-    while len(extreme_points) < num_pairs * 2:
-        new_points = []
-        for i in range(len(extreme_points) - 1):
-            new_point = find_new_extreme_point(extreme_points[i], extreme_points[i + 1], coords_np)
-            if new_point is not None:
-                new_points.append(new_point)
-        new_points.sort(key=lambda p: p[0])
-        extreme_points.extend(new_points)
-        extreme_points.sort(key=lambda p: p[0])
-
-    # Pairing and finding middle points
-    middle_points = []
-    for i in range(0, len(extreme_points), 2):
-        pair_midpoint = (extreme_points[i] + extreme_points[i + 1]) / 2
-        middle_points.append(pair_midpoint)
-
-    return middle_points
-
-def find_extreme_points3(coords_list, num_points=10):
     if num_points < 2:
         raise ValueError("Number of points must be at least 2")
 
@@ -3550,3 +3393,187 @@ def find_extreme_points3(coords_list, num_points=10):
         mark_point(middle_point, "middle_point")
 
     return middle_points
+
+def find_closest_pairs(top_half, bottom_half):
+    pairs = []
+    for top_point in top_half:
+        distances = np.sqrt(np.sum((bottom_half - top_point) ** 2, axis=1))
+        closest_index = np.argmin(distances)
+        closest_point = bottom_half[closest_index]
+        pairs.append((top_point, closest_point))
+    return pairs
+
+    middle_points = []
+    for top_point, bottom_point in pairs:
+        middle_point = (top_point + bottom_point) / 2
+        middle_points.append(middle_point)
+        mark_point(middle_point, "middle_point")
+    return middle_points
+
+def find_evenly_distributed_pairs(coords_list, num_pairs):
+    coords_np = np.array(coords_list)
+    coords_y = coords_np[:, 1]
+
+    top_mask = coords_y >= np.median(coords_y)
+    top_half = coords_np[top_mask]
+    bottom_half = coords_np[~top_mask]
+
+    top_half_sorted = top_half[np.argsort(top_half[:, 0])]
+    bottom_half_sorted = bottom_half[np.argsort(bottom_half[:, 0])]
+
+    pairs = find_closest_pairs(top_half_sorted, bottom_half_sorted)
+    selected_pairs = pairs[::len(pairs) // num_pairs][:num_pairs]
+
+    return selected_pairs
+
+def locate_middle_points(coords_list, num_points=3):
+    coords_np = np.array(coords_list)
+
+    # Find corner points
+    top_left = coords_np[coords_np[:, 1].argmax()]
+    top_right = coords_np[coords_np[:, 0].argmax()]
+    bottom_left = coords_np[coords_np[:, 1].argmin()]
+    bottom_right = coords_np[coords_np[:, 0].argmin()]
+
+    # Calculate vectors for the long sides of the rectangle
+    left_side_vector = bottom_left - top_left
+    right_side_vector = bottom_right - top_right
+
+    # Project points onto the long side vectors to find extreme points
+    def project_and_find_extremes(points, base_point, vector):
+        projections = np.dot(points - base_point, vector) / np.linalg.norm(vector)
+        min_idx = np.argmin(projections)
+        max_idx = np.argmax(projections)
+        return points[min_idx], points[max_idx]
+
+    top_left_proj, bottom_left_proj = project_and_find_extremes(coords_np, top_left, left_side_vector)
+    top_right_proj, bottom_right_proj = project_and_find_extremes(coords_np, top_right, right_side_vector)
+
+    # Function to interpolate points on a line
+    def interpolate_points(start, end, num):
+        return [start + (end - start) * i / (num - 1) for i in range(num)]
+
+    # Interpolate points on top and bottom edges
+    left_points = interpolate_points(top_left_proj, bottom_left_proj, num_points)
+    right_points = interpolate_points(top_right_proj, bottom_right_proj, num_points)
+
+    # Pair points based on proximity
+    pairs = list(zip(left_points, right_points))
+
+    # Calculate middle points
+    middle_points = [(left + right) / 2 for left, right in pairs]
+
+    mark_point(top_left,"top_left")
+    mark_point(top_right,"top_right")
+    mark_point(bottom_left,"bottom_left")
+    mark_point(bottom_right,"bottom_right")
+    
+    for point in left_points:
+        mark_point(point,"left_points")
+    for point in right_points:
+        mark_point(point,"right_points")
+    for point in middle_points:
+        mark_point(point,"middle")
+        
+    return middle_points
+
+
+    coords_np = np.array(coords_list)
+    points_kdtree = KDTree(coords_np)
+    
+    def find_closest_point(point, kdtree):
+        distance, index = kdtree.query(point)
+        return kdtree.data[index]
+
+    def find_corner_points(coords_np):
+        top_left = coords_np[coords_np[:, 1].argmax()]
+        top_right = coords_np[coords_np[:, 0].argmax()]
+        bottom_right = coords_np[coords_np[:, 1].argmin()]
+        bottom_left = coords_np[coords_np[:, 0].argmin()]
+        return top_left, top_right, bottom_left, bottom_right
+
+    top_left, top_right, bottom_left, bottom_right = find_corner_points(coords_np)
+
+    # Snap the corner points to the nearest points in coords_list
+    top_left = find_closest_point(top_left, points_kdtree)
+    top_right = find_closest_point(top_right, points_kdtree)
+    bottom_left = find_closest_point(bottom_left, points_kdtree)
+    bottom_right = find_closest_point(bottom_right, points_kdtree)
+
+    # Ensure there are at least two middle points
+    num_middle_points = max(num_middle_points, 2)
+
+    def interpolate_points(p1, p2, num_points):
+        if num_points <= 2:
+            return [p1, p2]
+        
+        step = (p2 - p1) / (num_points - 1)
+        return [p1 + step * i for i in range(num_points)]
+
+    # Directly calculate the middle points
+    middle_points = []
+    for i in range(num_middle_points):
+        top_point = interpolate_points(top_left, top_right, num_middle_points)[i]
+        bottom_point = interpolate_points(bottom_left, bottom_right, num_middle_points)[i]
+        middle_point = (top_point + bottom_point) / 2
+        middle_points.append(middle_point)
+        mark_point(top_point,"top_point")
+        mark_point(bottom_point,"bottom_point")
+        mark_point(middle_point,"middle_point")
+
+    # Ensure end points are added
+    middle_points.insert(0, (top_left + bottom_left) / 2)
+    middle_points.append((top_right + bottom_right) / 2)
+
+    return middle_points
+
+def create_smoother_middle_points(coords_list, num_segments=10):
+    coords_np = np.array(coords_list)
+
+    # Identify the points with extreme x values (leftmost and rightmost)
+    leftmost_x = coords_np[:, 0].min()
+    rightmost_x = coords_np[:, 0].max()
+
+    leftmost_points = coords_np[coords_np[:, 0] == leftmost_x]
+    rightmost_points = coords_np[coords_np[:, 0] == rightmost_x]
+
+    # Identify the top and bottom points among the leftmost and rightmost points
+    top_left = leftmost_points[leftmost_points[:, 1].argmax()]
+    bottom_left = leftmost_points[leftmost_points[:, 1].argmin()]
+    top_right = rightmost_points[rightmost_points[:, 1].argmax()]
+    bottom_right = rightmost_points[rightmost_points[:, 1].argmin()]
+
+    # Initialize the middle points list with the leftmost middle point
+    middle_points = [(top_left + bottom_left) / 2]
+
+    # Divide the remaining line into segments
+    segment_width = (rightmost_x - leftmost_x) / (num_segments - 1)
+
+    for i in range(1, num_segments):
+        # Determine the segment boundaries
+        x_min = leftmost_x + i * segment_width
+        x_max = leftmost_x + (i + 1) * segment_width
+
+        # Filter points in the current segment
+        segment_points = coords_np[(coords_np[:, 0] >= x_min) & (coords_np[:, 0] < x_max)]
+
+        if len(segment_points) > 0:
+            # Find the top and bottom points in this segment
+            top_point = segment_points[segment_points[:, 1].argmax()]
+            bottom_point = segment_points[segment_points[:, 1].argmin()]
+
+            # Calculate the middle point
+            middle_point = (top_point + bottom_point) / 2
+            middle_points.append(middle_point)
+            mark_point(middle_point,"middle_point")
+    # Add the rightmost middle point at the end
+    middle_points.append((top_right + bottom_right) / 2)
+
+
+    mark_point(top_left,"top_left")
+    mark_point(top_right,"top_right")
+    mark_point(bottom_left,"bottom_left")
+    mark_point(bottom_right,"bottom_right")
+    
+    return middle_points
+
