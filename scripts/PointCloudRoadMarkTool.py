@@ -891,14 +891,16 @@ class TriangleMarkOperator(bpy.types.Operator):
 
             if rectangle_coords:
                 #filters out bad points
-                rectangle_coords = filter_noise_with_dbscan(rectangle_coords, 0.06, 10)
+                rectangle_coords = filter_noise_with_dbscan(rectangle_coords)
                 self._processed_indices.update(checked_indices)
                 triangle_vertices = create_flexible_triangle(rectangle_coords)
                 self._triangles.append(triangle_vertices)
                 create_shape(rectangle_coords, shape_type="triangle")
 
                 if len(self._triangles) == 2:
-                    self.perform_automatic_marking(context, intensity_threshold)
+                    outer_corners= self.find_outermost_corners(self._triangles[0], self._triangles[1])
+                    create_polyline("triangles_base_line",outer_corners)
+                    self.perform_automatic_marking(context, intensity_threshold,outer_corners)
                 
         elif event.type == 'ESC':
             SimpleMarkOperator._is_running = False
@@ -907,14 +909,31 @@ class TriangleMarkOperator(bpy.types.Operator):
         
         return {'RUNNING_MODAL'}
     
-    def perform_automatic_marking(self, context, intensity_threshold):
-        centers = [np.mean(triangle, axis=0) for triangle in self._triangles[:2]]
-        line_points = self.interpolate_line(centers[0], centers[1])
+    @staticmethod
+    def find_outermost_corners(triangle1, triangle2):
+        max_distance = 0
+        outermost_points = (None, None)
 
-        for point in line_points:
-            mark_point(point)
-            self.simulate_click_and_grow(point, context, intensity_threshold)
-
+        for point1 in triangle1:
+            for point2 in triangle2:
+                distance = np.linalg.norm(np.array(point1) - np.array(point2))
+                if distance > max_distance:
+                    max_distance = distance
+                    outermost_points = (point1, point2)
+        return outermost_points
+    
+    def perform_automatic_marking(self, context, intensity_threshold,outer_corners):
+        if len(self._triangles) >= 2:
+            centers = [np.mean(triangle, axis=0) for triangle in self._triangles[:2]]
+            middle_points = self.interpolate_line(centers[0], centers[1])
+            for point in middle_points:
+                self.simulate_click_and_grow(point, context, intensity_threshold)
+            #Move triangle down to the base line
+            for triangle in self._triangles:
+                move_blender_triangle_objects(triangle, outer_corners[0], outer_corners[1])
+                print("Moved Triangle")
+                
+                
     def simulate_click_and_grow(self, location, context, intensity_threshold):
         global point_coords, point_colors, points_kdtree
 
@@ -951,6 +970,7 @@ class TriangleMarkOperator(bpy.types.Operator):
     def interpolate_line(self, start, end, num_points=50):
         # Generate points along the line between start and end
         return [start + t * (end - start) for t in np.linspace(0, 1, num_points)]
+
 
     
     def invoke(self, context, event):
@@ -1591,7 +1611,42 @@ def create_fixed_triangle(context, location, size=1.0):
     mat = bpy.data.materials.new(name="TriangleMaterial")
     mat.diffuse_color = (1, 0, 0, 1)  # Red color with full opacity
     obj.data.materials.append(mat)   
-             
+    
+def create_fixed_size_triangle(coords):
+    # Convert coords to numpy array for efficient operations
+    coords_np = np.array(coords)
+
+    # Calculate the center of the triangle
+    center = np.mean(coords_np, axis=0)
+
+    # Compute pairwise distances
+    pairwise_distances = np.linalg.norm(coords_np[:, np.newaxis] - coords_np, axis=2)
+
+    # Find the two points that are the furthest apart
+    max_dist_indices = np.unravel_index(np.argmax(pairwise_distances), pairwise_distances.shape)
+    vertex1 = coords_np[max_dist_indices[0]]
+    vertex2 = coords_np[max_dist_indices[1]]
+
+    # Compute the third vertex
+    third_vertex = None
+    max_distance = 0
+    for point in coords_np:
+        diff = point - vertex1
+        proj = np.dot(diff, (vertex2 - vertex1) / np.linalg.norm(vertex2 - vertex1))
+        distance_to_line = np.linalg.norm(diff - proj)
+        if distance_to_line > max_distance:
+            max_distance = distance_to_line
+            third_vertex = point
+
+    # Scale the triangle to the desired size (30x30x30)
+    scale_factor = 0.5 / np.max(pairwise_distances)
+    scaled_vertices = (coords_np - center) * scale_factor + center
+
+    # Ensuring that the scaled triangle has its vertices in the same orientation as the original
+    scaled_vertex1, scaled_vertex2, scaled_third_vertex = scaled_vertices
+
+    return [scaled_vertex1.tolist(), scaled_vertex2.tolist(), scaled_third_vertex.tolist()]         
+    
 def create_fixed_square(context, location, size=1.0):
     # Create new mesh and object
     mesh = bpy.data.meshes.new('FixedSquare')
@@ -1668,11 +1723,12 @@ def create_shape(coords_list, shape_type):
     coords_list=filter_noise_with_dbscan(coords_list)
     if shape_type == "triangle":
         print("Drawing triangle")
-        shape_coords = create_flexible_triangle(coords_list)
+        coords_list = create_flexible_triangle(coords_list)
+        shape_coords=create_fixed_size_triangle(coords_list)
         obj=create_mesh_with_material(
             "triangle Shape", shape_coords,
             marking_color, transparency)
-        vertices=create_flexible_triangle(coords_list)
+        vertices=create_fixed_size_triangle(coords_list)
         obj=create_triangle_outline(vertices)
         
     elif shape_type == "rectangle":
@@ -1684,7 +1740,7 @@ def create_shape(coords_list, shape_type):
         
     elif shape_type == "curved line":
         print("Drawing curved line")
-        middle_points = create_smoother_middle_points(coords_list)
+        middle_points = create_middle_points(coords_list)
 
         fixed_length_points, total_length, segments = create_fixed_length_segments(middle_points)
         print(f"Total line length: {total_length:.2f} meters")
@@ -3527,7 +3583,7 @@ def locate_middle_points(coords_list, num_points=3):
 
     return middle_points
 
-def create_smoother_middle_points(coords_list, num_segments=10):
+def create_middle_points(coords_list, num_segments=10):
     coords_np = np.array(coords_list)
 
     # Identify the points with extreme x values (leftmost and rightmost)
@@ -3577,3 +3633,140 @@ def create_smoother_middle_points(coords_list, num_segments=10):
     
     return middle_points
 
+def create_segmented_middle_points(coords_list, segment_length=1):
+    coords_np = np.array(coords_list)
+
+    # Identify the points with extreme x values (leftmost and rightmost)
+    leftmost_x = coords_np[:, 0].min()
+    rightmost_x = coords_np[:, 0].max()
+
+    leftmost_points = coords_np[coords_np[:, 0] == leftmost_x]
+    rightmost_points = coords_np[coords_np[:, 0] == rightmost_x]
+
+    # Identify the top and bottom points among the leftmost and rightmost points
+    top_left = leftmost_points[leftmost_points[:, 1].argmax()]
+    bottom_left = leftmost_points[leftmost_points[:, 1].argmin()]
+    top_right = rightmost_points[rightmost_points[:, 1].argmax()]
+    bottom_right = rightmost_points[rightmost_points[:, 1].argmin()]
+
+    # Initialize the middle points list
+    middle_points = []
+
+    # Total length of the line
+    total_length = rightmost_x - leftmost_x
+
+    # Handle the case when the total length is shorter than the segment length
+    if total_length <= segment_length:
+        # Add a middle point between the leftmost and rightmost points
+        middle_points.append((top_left + bottom_left) / 2)
+        middle_points.append((top_right + bottom_right) / 2)
+        return middle_points
+
+    # Calculate the number of segments based on the segment length
+    num_segments = int(np.ceil(total_length / segment_length))
+
+    for i in range(num_segments):
+        # Determine the segment boundaries
+        x_min = leftmost_x + i * segment_length
+        x_max = min(leftmost_x + (i + 1) * segment_length, rightmost_x)
+
+        # Filter points in the current segment
+        segment_points = coords_np[(coords_np[:, 0] >= x_min) & (coords_np[:, 0] <= x_max)]
+
+        if len(segment_points) > 0:
+            # Find the top and bottom points in this segment
+            top_point = segment_points[segment_points[:, 1].argmax()]
+            bottom_point = segment_points[segment_points[:, 1].argmin()]
+
+            # Calculate the middle point
+            middle_point = (top_point + bottom_point) / 2
+            middle_points.append(middle_point)
+
+    # Ensure there is a middle point at the very end
+    if middle_points[-1][0] < rightmost_x:
+        middle_points.append((top_right + bottom_right) / 2)
+
+    return middle_points
+
+def move_triangle_to_line(triangle, line_start, line_end):
+    # Convert inputs to numpy arrays for easier calculations
+    triangle_np = np.array(triangle)
+    line_start_np = np.array(line_start)
+    line_end_np = np.array(line_end)
+
+    # Identify the base vertices (the two closest to the line)
+    base_vertex_indices = find_base_vertices(triangle_np, line_start_np, line_end_np)
+    base_vertices = triangle_np[base_vertex_indices]
+
+    # Find the closest points on the line for the base vertices
+    closest_points = [closest_point(vertex, line_start_np, line_end_np) for vertex in base_vertices]
+
+    # Move the base vertices to the closest points on the line
+    triangle_np[base_vertex_indices] = closest_points
+
+    # Calculate the height of the triangle to reposition the third vertex
+    third_vertex_index = 3 - sum(base_vertex_indices)  # Assuming indices are 0, 1, 2
+    height_vector = triangle_np[third_vertex_index] - np.mean(base_vertices, axis=0)
+    triangle_np[third_vertex_index] = np.mean(closest_points, axis=0) + height_vector
+
+    return triangle_np.tolist()
+
+def find_base_vertices(triangle, line_start, line_end):
+    distances = [np.linalg.norm(closest_point(vertex, line_start, line_end) - vertex) for vertex in triangle]
+    sorted_indices = np.argsort(distances)
+    return sorted_indices[:2]  # Indices of the two closest vertices
+def find_closest_vertex_to_line(triangle, line_start, line_end):
+    min_distance = float('inf')
+    closest_vertex_index = -1
+
+    for i, vertex in enumerate(triangle):
+        closest_point_on_line = closest_point(vertex, line_start, line_end)
+        distance = np.linalg.norm(vertex - closest_point_on_line)
+        if distance < min_distance:
+            min_distance = distance
+            closest_vertex_index = i
+
+    return closest_vertex_index
+
+def find_base_vertex(triangle, line_start, line_end):
+    min_distance = float('inf')
+    base_vertex = None
+    base_index = None
+
+    for i, vertex in enumerate(triangle):
+        closest_point_on_line = closest_point(vertex, line_start, line_end)
+        distance = np.linalg.norm(vertex - closest_point_on_line)
+        if distance < min_distance:
+            min_distance = distance
+            base_vertex = vertex
+            base_index = i
+
+    return base_vertex, base_index
+
+def closest_point(point, line_start, line_end):
+    line_vec = line_end - line_start
+    point_vec = point - line_start
+    line_len = np.linalg.norm(line_vec)
+    line_unitvec = line_vec / line_len
+    point_vec_scaled = point_vec / line_len
+    t = np.dot(line_unitvec, point_vec_scaled)    
+    if t < 0.0:
+        t = 0.0
+    elif t > 1.0:
+        t = 1.0
+    nearest = line_vec * t
+    return line_start + nearest
+
+def move_blender_triangle_objects(new_vertices, line_start, line_end):
+    for obj in bpy.data.objects:
+        if "triangle Shape" in obj.name and obj.type == 'MESH':
+            if len(obj.data.vertices) >= 3:
+                # Assuming the object represents a triangle
+                current_triangle = [obj.data.vertices[i].co for i in range(3)]
+                moved_triangle = move_triangle_to_line(current_triangle, line_start, line_end)
+
+                # Update the vertices of the mesh
+                for i, vertex in enumerate(obj.data.vertices[:3]):
+                    vertex.co = moved_triangle[i]
+            else:
+                print(f"Object '{obj.name}' does not have enough vertices")
