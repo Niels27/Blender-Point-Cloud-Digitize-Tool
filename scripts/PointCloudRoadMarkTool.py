@@ -25,9 +25,15 @@ def install_libraries(library_list):
             print(f"Successfully installed {library}")
         except subprocess.CalledProcessError as e:
             print(f"Error installing {library}: {e}")
-            
-# uncomment to install libraries 
-#install_libraries('opencv-python')    
+def uninstall_libraries(library_list):
+    for library in library_list:
+        try:
+            subprocess.check_call([sys.executable, '-m', 'pip', 'uninstall', library])
+            print(f"Successfully uninstall {library}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error uninstall {library}: {e}")                    
+# uncomment to install/uninstall libraries 
+#install_libraries('library_list')    
 #uninstall_libraries('library name'):
 
 #imports
@@ -75,13 +81,15 @@ point_coords = None
 point_colors = None
 original_coords = None
 points_kdtree = None #The loaded ckdtree of coords that all functions can access
-collection_name = "Collection"
+collection_name = "Collection" #the default collection name in blender
 point_cloud_point_size =  1
 shape_counter=1 #Keeps track of amount of shapes currently in viewport
-objects_z_height=0.1 #Height of all markings
+objects_z_height=0.5 #Height of all markings
 auto_load=True # Automatically imports a file called auto.laz on every execution 
 auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz
- 
+save_shapes=True
+show_dots=False
+
 #Keeps track of all objects created/removed for undo/redo functions
 undo_stack = []
 redo_stack = []
@@ -202,7 +210,14 @@ def pointcloud_load(path, point_size, sparsity_value):
         # Handle any other exceptions that might occur
         print(f"An error occurred: {e}")
              
-def create_point_cloud_object(points_ar, colors_ar, point_size, collection_name):
+class CreatePointCloudObjectOperator(bpy.types.Operator):
+    
+    bl_idname = "custom.create_point_cloud_object"
+    bl_label = "Create point cloud object"
+    
+    global point_coords, point_colors, point_cloud_point_size, collection_name
+    
+    def create_point_cloud_object(self, points_ar, colors_ar, point_size, collection_name):
     
       #Create a new mesh
       mesh = bpy.data.meshes.new("Point Cloud Mesh")
@@ -267,19 +282,12 @@ def create_point_cloud_object(points_ar, colors_ar, point_size, collection_name)
         mesh.materials.append(material)
         
       # After the object is created, store it 
-      store_object_state(obj)
-      return obj
-
-class CreatePointCloudObjectOperator(bpy.types.Operator):
-    
-    bl_idname = "custom.create_point_cloud_object"
-    bl_label = "Create point cloud object"
-    
-    global point_coords, point_colors, point_cloud_point_size, collection_name
-     
+      #store_object_state(obj)
+      return obj 
+   
     def execute(self, context):
         start_time = time.time()
-        create_point_cloud_object(point_coords, point_colors, point_cloud_point_size, collection_name)
+        self.create_point_cloud_object(point_coords,point_colors, point_cloud_point_size, collection_name)
         print("--- %s seconds ---" % (time.time() - start_time))
         return {'FINISHED'}
     
@@ -321,14 +329,14 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
             coord_3d_start = self.prev_end_point
         else:
             coord_3d_start = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-            #coord_3d_start.z += objects_z_height  # Add to the z dimension to prevent clipping
+            coord_3d_start.z += objects_z_height  # Add to the z dimension to prevent clipping
 
         coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-        #coord_3d_end.z += objects_z_height  
+        coord_3d_end.z += objects_z_height  
 
         # Create a new mesh object for the line
         mesh = bpy.data.meshes.new(name="Line Mesh")
-        obj = bpy.data.objects.new("Line Object", mesh)
+        obj = bpy.data.objects.new("Thin Line", mesh)
         
         # After the object is created, store it 
         store_object_state(obj)
@@ -358,7 +366,7 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
         self.prev_end_point = coord_3d_end
 
         # Create a rectangle object on top of the line
-        create_rectangle_object(coord_3d_start, coord_3d_end, width)
+        create_rectangle_line_object(coord_3d_start, coord_3d_end)
         
 
     def cancel(self, context):
@@ -1151,7 +1159,7 @@ def draw_line(self, context, event):
     
     #Convert the mouse position to a 3D location for the end point of the line
     coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-    #coord_3d_end.z += objects_z_height  # Add to the z dimension to prevent clipping
+    coord_3d_end.z += objects_z_height  # Add to the z dimension to prevent clipping
 
     #Check if the current click is on a white road mark
     on_white_end = is_click_on_white(self, context, coord_3d_end)
@@ -1170,7 +1178,7 @@ def draw_line(self, context, event):
             print(f"Mouseclick {self.click_counter - 1} and Mouseclick {self.click_counter}are both on a white road mark.") 
             wrong_click="none" 
             coord_3d_start, coord_3d_end = snap_to_road_mark(self, context, coord_3d_start,coord_3d_end, click_to_correct=wrong_click)   
-            create_rectangle_object(coord_3d_start, coord_3d_end)
+            create_rectangle_line_object(coord_3d_start, coord_3d_end)
             
         elif on_white_start:
             print(f"Mouseclick {self.click_counter - 1} is on a white road mark,Mouseclick {self.click_counter} is not.")
@@ -1191,10 +1199,9 @@ def draw_line(self, context, event):
     #Update the previous end point to be the current one for the next click
     self.prev_end_point = coord_3d_end
     
-def snap_to_road_mark(self, context, first_click_point, last_click_point, click_to_correct):
+def snap_to_road_mark(self, context, first_click_point, last_click_point, click_to_correct,region_radius=10):
     
     intensity_threshold = context.scene.intensity_threshold
-    region_radius = 10
     
     global point_coords, point_colors, points_kdtree
         
@@ -1335,7 +1342,7 @@ class CorrectionPopUpOperator(bpy.types.Operator):
         if self.action == ('CANCEL'):
             print("Canceled line drawing")
         else:
-            create_rectangle_object(coord_3d_start, coord_3d_end)
+            create_rectangle_line_object(coord_3d_start, coord_3d_end)
         
         return {'FINISHED'}
 
@@ -1584,7 +1591,7 @@ def create_fixed_triangle(context, location, size=1.0):
     global objects_z_height
     # Create new mesh and object
     mesh = bpy.data.meshes.new('FixedTriangle')
-    obj = bpy.data.objects.new('FixedTriangle', mesh)
+    obj = bpy.data.objects.new('Fixed Triangle', mesh)
 
     # Link object to scene
     bpy.context.collection.objects.link(obj)
@@ -1612,7 +1619,7 @@ def create_fixed_triangle(context, location, size=1.0):
     mat.diffuse_color = (1, 0, 0, 1)  # Red color with full opacity
     obj.data.materials.append(mat)   
     
-def create_fixed_size_triangle(coords):
+def create_fixed_snapping_triangle(coords):
     # Convert coords to numpy array for efficient operations
     coords_np = np.array(coords)
 
@@ -1650,7 +1657,7 @@ def create_fixed_size_triangle(coords):
 def create_fixed_square(context, location, size=1.0):
     # Create new mesh and object
     mesh = bpy.data.meshes.new('FixedSquare')
-    obj = bpy.data.objects.new('FixedSquare', mesh)
+    obj = bpy.data.objects.new('Fixed Square', mesh)
 
     # Link object to scene
     bpy.context.collection.objects.link(obj)
@@ -1682,8 +1689,7 @@ def create_fixed_square(context, location, size=1.0):
     mat = bpy.data.materials.new(name="SquareMaterial")
     mat.diffuse_color = (1, 0, 0, 1)  # Red color with full opacity
     obj.data.materials.append(mat)
-    
-   
+      
 def create_polyline(name, points, width=0.01, color=(1, 0, 0, 1)):
     # Create a new curve data object
     curve_data = bpy.data.curves.new(name, type='CURVE')
@@ -1724,11 +1730,11 @@ def create_shape(coords_list, shape_type):
     if shape_type == "triangle":
         print("Drawing triangle")
         coords_list = create_flexible_triangle(coords_list)
-        shape_coords=create_fixed_size_triangle(coords_list)
+        shape_coords=create_fixed_snapping_triangle(coords_list)
         obj=create_mesh_with_material(
             "triangle Shape", shape_coords,
             marking_color, transparency)
-        vertices=create_fixed_size_triangle(coords_list)
+        vertices=create_fixed_snapping_triangle(coords_list)
         obj=create_triangle_outline(vertices)
         
     elif shape_type == "rectangle":
@@ -1746,7 +1752,7 @@ def create_shape(coords_list, shape_type):
         print(f"Total line length: {total_length:.2f} meters")
         print(f"Segmented lines drawn: {segments}")
 
-        obj=create_polyline("CurvedLine", middle_points, width=line_width, color=(marking_color[0], marking_color[1], marking_color[2], transparency))
+        obj=create_polyline("Poly Line", middle_points, width=line_width, color=(marking_color[0], marking_color[1], marking_color[2], transparency))
    
     else:
         print("Drawing unkown Shape")
@@ -1756,9 +1762,7 @@ def create_shape(coords_list, shape_type):
         
     store_object_state(obj)
     print(f"Rendered {shape_type} shape in: {time.time() - start_time:.2f} seconds")
-
-
-   
+  
 def create_mesh_with_material(obj_name, shape_coords, marking_color, transparency):
     
     global objects_z_height
@@ -1789,7 +1793,7 @@ def create_mesh_with_material(obj_name, shape_coords, marking_color, transparenc
     return obj
 
 #Function to create a colored, resizable line object on top of the line      
-def create_rectangle_object(start, end):
+def create_rectangle_line_object(start, end):
     
     context = bpy.context
     marking_color = context.scene.marking_color
@@ -1869,7 +1873,7 @@ def create_dots_shape(coords_list):
     
     # Create a new mesh and link it to the scene
     mesh = bpy.data.meshes.new("Combined Shape")
-    obj = bpy.data.objects.new("Combined Shape", mesh)
+    obj = bpy.data.objects.new("Dots Shape", mesh)
     bpy.context.collection.objects.link(obj)
 
     bm = bmesh.new()
@@ -1937,89 +1941,39 @@ def create_dots_shape(coords_list):
     #After the object is created, store it 
     store_object_state(obj)
     
-#Opencv shape detection from points    
-def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
-
-    if from_bmesh:
-        # Convert bmesh vertices to numpy array
-        coords_list = np.array([(point.x, point.y, point.z) for point in points])
-    else:
-        coords_list = np.array(points)
+#Checks whether the mouseclick happened in the viewport or elsewhere    
+def is_mouse_in_3d_view(context, event):
     
-    coords_list = filter_noise_with_dbscan(coords_list)
-    #Convert the floating points to integers
-    int_coords = np.round(coords_list).astype(int)
+    # Identify the 3D Viewport area and its regions
+    view_3d_area = next((area for area in context.screen.areas if area.type == 'VIEW_3D'), None)
+    if view_3d_area is not None:
+        toolbar_region = next((region for region in view_3d_area.regions if region.type == 'TOOLS'), None)
+        ui_region = next((region for region in view_3d_area.regions if region.type == 'UI'), None)
+        view_3d_window_region = next((region for region in view_3d_area.regions if region.type == 'WINDOW'), None)
 
-    #Remove the Z-coordinate 
-    xy_coords = int_coords[:, :2]  
+        # Check if the mouse is inside the 3D Viewport's window region
+        if view_3d_window_region is not None:
+            mouse_inside_view3d = (
+                view_3d_window_region.x < event.mouse_x < view_3d_window_region.x + view_3d_window_region.width and 
+                view_3d_window_region.y < event.mouse_y < view_3d_window_region.y + view_3d_window_region.height
+            )
+            
+            # Exclude areas occupied by the toolbar or UI regions
+            if toolbar_region is not None:
+                mouse_inside_view3d &= not (
+                    toolbar_region.x < event.mouse_x < toolbar_region.x + toolbar_region.width and 
+                    toolbar_region.y < event.mouse_y < toolbar_region.y + toolbar_region.height
+                )
+            if ui_region is not None:
+                mouse_inside_view3d &= not (
+                    ui_region.x < event.mouse_x < ui_region.x + ui_region.width and 
+                    ui_region.y < event.mouse_y < ui_region.y + ui_region.height
+                )
+            
+            return mouse_inside_view3d
 
-    #Scale the coordinates to increase the shape size
-    scaled_coords = xy_coords * scale_factor
-    
-    #Find min and max bounds for the coordinates for the canvas size
-    min_vals = xy_coords.min(axis=0) * scale_factor  
-    max_vals = xy_coords.max(axis=0) * scale_factor  
-    
-    #Create a binary image
-    img = np.zeros((max_vals[1] - min_vals[1] + scale_factor, max_vals[0] - min_vals[0] + scale_factor), dtype=np.uint8)
-    #Apply gaussian blur
-    img = cv2.GaussianBlur(img, (5, 5), 0)
-    #Shift points based on min_vals to fit within the image
-    shifted_points = scaled_coords  - min_vals + 5  
-
-    #Reshape points to the format needed by fillPoly 
-    reshaped_points = shifted_points.reshape((-1, 1, 2))
-
-    #Draw the shape filled (as white) on the image
-    cv2.fillPoly(img, [reshaped_points], 255)
-
-    #Find contours and select the contour with the maximum area 
-    contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL , cv2.CHAIN_APPROX_SIMPLE)
-    contour = max(contours, key=cv2.contourArea)
-    print(len(contours) , "contours found")
-    #Draw all the contours found on an image
-    contour_image = cv2.cvtColor(img.copy(), cv2.COLOR_GRAY2BGR)  # Convert to a 3-channel image 
-    cv2.drawContours(contour_image, contours, -1, (0, 255, 0), 1)  # Draws contours in green 
-
-    display_contour=False
-    save_countor=True
-    
-    if(display_contour):
-        #Display the image with contours
-        cv2.imshow("Contours", contours)
-        cv2.waitKey(0)  
-        cv2.destroyAllWindows()
-        
-    if(save_countor):
-        # Save the image
-        output_path = output_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'contours', 'contours.png')
-        cv2.imwrite(output_path, contour_image)
-        print("contour saved at ",output_path)
-    
-    #Approximate the contour to a simpler shape
-    epsilon = 0.02 * cv2.arcLength(contour, True)
-    approx = cv2.approxPolyDP(contour, epsilon, True)
-
-    #Based on the number of vertices, determine the shape
-    num_vertices = len(approx)
-    print("number of vertices detected: ",num_vertices)
-    shape = "unknown"
-    if num_vertices == 3:
-        shape="rectangle"
-    if num_vertices == 4:
-        x, y, w, h = cv2.boundingRect(approx)
-        aspectRatio = float(w) / h
-        if 0.95 <= aspectRatio <= 1.05:
-            shape = "square"
-        else:
-            shape = "rectangle"
-
-        
-    #Print the detected shape
-    print(f"Detected shape: {shape}")
-
-    return shape
-
+    return False  # Default to False if checks fail.        
+ 
 def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=20):
     
     #DBSCAN clustering
@@ -2040,7 +1994,125 @@ def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=20):
     print(f"Points have been filtered. Original amount: {original_count}, Removed: {removed_count}")
 
     return filtered_coords
-                 
+
+def mark_point(point, name="point", size=0.05):
+    
+    global show_dots
+    
+    if show_dots:
+        # Create a cube to mark the point
+        bpy.ops.mesh.primitive_cube_add(size=size, location=point)
+        marker = bpy.context.active_object
+        marker.name = name
+        
+        # Create a new material with the specified color
+        mat = bpy.data.materials.new(name="MarkerMaterial")
+        mat.diffuse_color = (1.0, 0.0, 0.0, 1.0)  # Red color
+        mat.use_nodes = False  
+
+        # Assign it to the cube
+        if len(marker.data.materials):
+            marker.data.materials[0] = mat
+        else:
+            marker.data.materials.append(mat)
+
+def is_click_on_white(self, context, location):
+    global points_kdtree, point_colors
+    intensity_threshold = context.scene.intensity_threshold
+
+    # Define the number of nearest neighbors to search for
+    num_neighbors = 20
+    
+    # Use the k-d tree to find the nearest points to the click location
+    _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
+    
+    average_intensity=get_average_intensity(nearest_indices)
+
+    print(average_intensity)
+
+    # If the average intensity is above the threshold, return True (click is on a "white" object)
+    if average_intensity > intensity_threshold:
+        return True
+    else:
+        print("Intensity threshold not met")
+        return False
+    
+def create_triangle_outline(vertices):
+    # Create a new mesh and object for the triangle outline
+    mesh = bpy.data.meshes.new(name="TriangleOutline")
+    obj = bpy.data.objects.new("Triangle Outline", mesh)
+
+    # Link the object to the scene
+    bpy.context.collection.objects.link(obj)
+    bpy.context.view_layer.objects.active = obj
+    obj.select_set(True)
+
+    # Define edges for the triangle outline
+    edges = [(0, 1), (1, 2), (2, 0)]
+
+    # Create the mesh data
+    mesh.from_pydata(vertices, edges, [])  # No faces
+    mesh.update()
+
+    # Ensure the object scale is applied
+    bpy.context.view_layer.objects.active = obj
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    
+    '''wireframe_modifier = obj.modifiers.new(name="Wireframe", type='WIREFRAME')
+    wireframe_modifier.thickness = 0.1 # Adjust this value for desired thickness'''
+    
+    return obj
+
+def create_middle_points(coords_list, num_segments=10):
+    coords_np = np.array(coords_list)
+
+    # Identify the points with extreme x values (leftmost and rightmost)
+    leftmost_x = coords_np[:, 0].min()
+    rightmost_x = coords_np[:, 0].max()
+
+    leftmost_points = coords_np[coords_np[:, 0] == leftmost_x]
+    rightmost_points = coords_np[coords_np[:, 0] == rightmost_x]
+
+    # Identify the top and bottom points among the leftmost and rightmost points
+    top_left = leftmost_points[leftmost_points[:, 1].argmax()]
+    bottom_left = leftmost_points[leftmost_points[:, 1].argmin()]
+    top_right = rightmost_points[rightmost_points[:, 1].argmax()]
+    bottom_right = rightmost_points[rightmost_points[:, 1].argmin()]
+
+    # Initialize the middle points list with the leftmost middle point
+    middle_points = [(top_left + bottom_left) / 2]
+
+    # Divide the remaining line into segments
+    segment_width = (rightmost_x - leftmost_x) / (num_segments - 1)
+
+    for i in range(1, num_segments):
+        # Determine the segment boundaries
+        x_min = leftmost_x + i * segment_width
+        x_max = leftmost_x + (i + 1) * segment_width
+
+        # Filter points in the current segment
+        segment_points = coords_np[(coords_np[:, 0] >= x_min) & (coords_np[:, 0] < x_max)]
+
+        if len(segment_points) > 0:
+            # Find the top and bottom points in this segment
+            top_point = segment_points[segment_points[:, 1].argmax()]
+            bottom_point = segment_points[segment_points[:, 1].argmin()]
+
+            # Calculate the middle point
+            middle_point = (top_point + bottom_point) / 2
+            middle_points.append(middle_point)
+            mark_point(middle_point,"middle_point")
+    # Add the rightmost middle point at the end
+    middle_points.append((top_right + bottom_right) / 2)
+
+
+    mark_point(top_left,"top_left")
+    mark_point(top_right,"top_right")
+    mark_point(bottom_left,"bottom_left")
+    mark_point(bottom_right,"bottom_right")
+    
+    return middle_points
+                
 #Operator to remove all drawn markings from the scene collection
 class RemoveAllMarkingsOperator(bpy.types.Operator):
     bl_idname = "custom.remove_all_markings"
@@ -2134,7 +2206,29 @@ def save_kdtree_to_file(file_path, kdtree):
     }
     with open(file_path, 'w') as file:
         json.dump(kdtree_data, file)
+        
 
+        if context.object:
+            bpy.ops.object.select_all(action='DESELECT')
+            context.view_layer.objects.active = context.object
+            context.object.select_set(True)
+            bpy.ops.object.delete()
+
+def store_object_state(obj):
+    save_shape_as_image(obj)
+    # Storing object state
+    obj_state = {
+        'name': obj.name,
+        'location': obj.location.copy(),
+        'rotation': obj.rotation_euler.copy(),
+        'scale': obj.scale.copy(),
+        'mesh': obj.data.copy() 
+    }
+    
+    undo_stack.append(obj_state) 
+    # Clear the redo stack
+    redo_stack.clear()       
+    
 # Clears the viewport and deletes the draw handler
 def redraw_viewport():
     
@@ -2193,21 +2287,6 @@ class OBJECT_OT_simple_redo(bpy.types.Operator):
             obj.update_tag()
             
         return {'FINISHED'}
-   
-def store_object_state(obj):
-    
-    # Storing object state
-    obj_state = {
-        'name': obj.name,
-        'location': obj.location.copy(),
-        'rotation': obj.rotation_euler.copy(),
-        'scale': obj.scale.copy(),
-        'mesh': obj.data.copy() 
-    }
-    
-    undo_stack.append(obj_state) 
-    # Clear the redo stack
-    redo_stack.clear()  
     
 # Panel for the Road Marking Digitizer
 class DIGITIZE_PT_Panel(bpy.types.Panel):
@@ -2389,138 +2468,269 @@ def unregister():
     
     bpy.utils.unregister_class(OBJECT_OT_simple_undo)
     bpy.utils.unregister_class(OBJECT_OT_simple_redo)
-    
-
-              
+                 
 if __name__ == "__main__":
     register()
     
     if(auto_load):
         bpy.ops.wm.las_auto_open()
         
-        
-        
-     
-        
-def uninstall_libraries(library_list):
-    for library in library_list:
-        try:
-            subprocess.check_call([sys.executable, '-m', 'pip', 'uninstall', library])
-            print(f"Successfully uninstall {library}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error uninstall {library}: {e}")         
-                 
-#Checks whether the mouseclick happened in the viewport or elsewhere    
-def is_mouse_in_3d_view(context, event):
-    
-    # Identify the 3D Viewport area and its regions
-    view_3d_area = next((area for area in context.screen.areas if area.type == 'VIEW_3D'), None)
-    if view_3d_area is not None:
-        toolbar_region = next((region for region in view_3d_area.regions if region.type == 'TOOLS'), None)
-        ui_region = next((region for region in view_3d_area.regions if region.type == 'UI'), None)
-        view_3d_window_region = next((region for region in view_3d_area.regions if region.type == 'WINDOW'), None)
+ 
+#triangle mark functions
+def move_triangle_to_line(triangle, line_start, line_end):
+    # Convert inputs to numpy arrays for easier calculations
+    triangle_np = np.array(triangle)
+    line_start_np = np.array(line_start)
+    line_end_np = np.array(line_end)
 
-        # Check if the mouse is inside the 3D Viewport's window region
-        if view_3d_window_region is not None:
-            mouse_inside_view3d = (
-                view_3d_window_region.x < event.mouse_x < view_3d_window_region.x + view_3d_window_region.width and 
-                view_3d_window_region.y < event.mouse_y < view_3d_window_region.y + view_3d_window_region.height
-            )
-            
-            # Exclude areas occupied by the toolbar or UI regions
-            if toolbar_region is not None:
-                mouse_inside_view3d &= not (
-                    toolbar_region.x < event.mouse_x < toolbar_region.x + toolbar_region.width and 
-                    toolbar_region.y < event.mouse_y < toolbar_region.y + toolbar_region.height
-                )
-            if ui_region is not None:
-                mouse_inside_view3d &= not (
-                    ui_region.x < event.mouse_x < ui_region.x + ui_region.width and 
-                    ui_region.y < event.mouse_y < ui_region.y + ui_region.height
-                )
-            
-            return mouse_inside_view3d
+    # Identify the base vertices (the two closest to the line)
+    base_vertex_indices = find_base_vertices(triangle_np, line_start_np, line_end_np)
+    base_vertices = triangle_np[base_vertex_indices]
 
-    return False  # Default to False if checks fail.        
-        
-#Defines an Operator for drawing a free straight line in the viewport using mouseclicks
-class DrawStraightLineOperator(bpy.types.Operator):
-    bl_idname = "custom.draw_straight_line"
-    bl_label = "Draw Straight Line"
-    
-    prev_end_point = None
+    # Find the closest points on the line for the base vertices
+    closest_points = [closest_point(vertex, line_start_np, line_end_np) for vertex in base_vertices]
 
-    def modal(self, context, event):
-        if event.type == 'LEFTMOUSE':
-            if event.value == 'RELEASE':
-                self.draw_line(context, event)
-                return {'RUNNING_MODAL'}
-        elif event.type == 'RIGHTMOUSE' or event.type == 'ESC':
-            return {'CANCELLED'}
+    # Move the base vertices to the closest points on the line
+    triangle_np[base_vertex_indices] = closest_points
 
-        return {'PASS_THROUGH'}
+    # Calculate the height of the triangle to reposition the third vertex
+    third_vertex_index = 3 - sum(base_vertex_indices)  # Assuming indices are 0, 1, 2
+    height_vector = triangle_np[third_vertex_index] - np.mean(base_vertices, axis=0)
+    triangle_np[third_vertex_index] = np.mean(closest_points, axis=0) + height_vector
 
-    def invoke(self, context, event):
-        self.prev_end_point = None
-        context.window_manager.modal_handler_add(self)
-        return {'RUNNING_MODAL'}
+    return triangle_np.tolist()
 
-    def draw_line(self, context, event):
-        view3d = context.space_data
-        region = context.region
-        region_3d = view3d.region_3d
-        marking_color = context.scene.marking_color  
-        global objects_z_height
+def find_base_vertices(triangle, line_start, line_end):
+    distances = [np.linalg.norm(closest_point(vertex, line_start, line_end) - vertex) for vertex in triangle]
+    sorted_indices = np.argsort(distances)
+    return sorted_indices[:2]  # Indices of the two closest vertices
+
+def find_closest_vertex_to_line(triangle, line_start, line_end):
+    min_distance = float('inf')
+    closest_vertex_index = -1
+
+    for i, vertex in enumerate(triangle):
+        closest_point_on_line = closest_point(vertex, line_start, line_end)
+        distance = np.linalg.norm(vertex - closest_point_on_line)
+        if distance < min_distance:
+            min_distance = distance
+            closest_vertex_index = i
+
+    return closest_vertex_index
+
+def find_base_vertex(triangle, line_start, line_end):
+    min_distance = float('inf')
+    base_vertex = None
+    base_index = None
+
+    for i, vertex in enumerate(triangle):
+        closest_point_on_line = closest_point(vertex, line_start, line_end)
+        distance = np.linalg.norm(vertex - closest_point_on_line)
+        if distance < min_distance:
+            min_distance = distance
+            base_vertex = vertex
+            base_index = i
+
+    return base_vertex, base_index
+
+def closest_point(point, line_start, line_end):
+    line_vec = line_end - line_start
+    point_vec = point - line_start
+    line_len = np.linalg.norm(line_vec)
+    line_unitvec = line_vec / line_len
+    point_vec_scaled = point_vec / line_len
+    t = np.dot(line_unitvec, point_vec_scaled)    
+    if t < 0.0:
+        t = 0.0
+    elif t > 1.0:
+        t = 1.0
+    nearest = line_vec * t
+    return line_start + nearest
+
+def move_blender_triangle_objects(new_vertices, line_start, line_end):
+    for obj in bpy.data.objects:
+        if "triangle Shape" in obj.name and obj.type == 'MESH':
+            if len(obj.data.vertices) >= 3:
+                # Assuming the object represents a triangle
+                current_triangle = [obj.data.vertices[i].co for i in range(3)]
+                moved_triangle = move_triangle_to_line(current_triangle, line_start, line_end)
+
+                # Update the vertices of the mesh
+                for i, vertex in enumerate(obj.data.vertices[:3]):
+                    vertex.co = moved_triangle[i]
+            else:
+                print(f"Object '{obj.name}' does not have enough vertices")
        
-        # Convert the 2D mouse position to a 3D coordinate
-        if self.prev_end_point:
-            coord_3d_start = self.prev_end_point
+#opencv
+def save_shape_as_image(obj):
+    
+    global save_shapes
+    obj_name=obj.name
+    
+    if obj_name =="Thin Line":
+        return
+    
+    if save_shapes:
+        # Ensure the object exists
+        if not obj:
+            raise ValueError(f"Object {obj_name} not found.")
+        
+        # Get the directory of the current Blender file
+        blend_file_path = bpy.data.filepath
+        directory = os.path.dirname(blend_file_path)
+
+        # Create a folder 'road_mark_images' if it doesn't exist
+        images_dir = os.path.join(directory, 'road_mark_images')
+        if not os.path.exists(images_dir):
+            os.makedirs(images_dir)
+
+
+        # Set up rendering
+        bpy.context.scene.render.engine = 'CYCLES'  # or 'BLENDER_EEVEE'
+        bpy.context.scene.render.image_settings.file_format = 'JPEG'
+        bpy.context.scene.render.resolution_x = 256
+        bpy.context.scene.render.resolution_y = 256
+        bpy.context.scene.render.resolution_percentage = 100
+
+        # Set up camera
+        cam = bpy.data.cameras.new("Camera")
+        cam_ob = bpy.data.objects.new("Camera", cam)
+        bpy.context.scene.collection.objects.link(cam_ob)
+        bpy.context.scene.camera = cam_ob
+
+        # Use orthographic camera
+        cam.type = 'ORTHO'
+
+        # Calculate the bounding box of the object
+        local_bbox_corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+        min_corner = Vector(local_bbox_corners[0])
+        max_corner = Vector(local_bbox_corners[6])
+
+        # Position the camera
+        bbox_center = (min_corner + max_corner) / 2
+        bbox_size = max_corner - min_corner
+        cam_ob.location = bbox_center + Vector((0, 0, max(bbox_size.x, bbox_size.y, bbox_size.z)))
+
+        # Adjust the orthographic scale to 75%
+        cam.ortho_scale = 1.33 * max(bbox_size.x, bbox_size.y)
+
+        # Point the camera downward
+        cam_ob.rotation_euler = (0, 0, 0)
+
+        # Set up lighting
+        light = bpy.data.lights.new(name="Light", type='POINT')
+        light_ob = bpy.data.objects.new(name="Light", object_data=light)
+        bpy.context.scene.collection.objects.link(light_ob)
+        light_ob.location = cam_ob.location + Vector((0, 0, 2))
+        light.energy = 50
+        light.energy += 100* max(0, cam_ob.location.z-1)
+        print("light energy: ",light.energy)
+        #light.energy=10
+        
+        # Set object material to bright white
+        mat = bpy.data.materials.new(name="WhiteMaterial")
+        mat.diffuse_color = (1, 1, 1, 1)  # White color
+        obj.data.materials.clear()
+        obj.data.materials.append(mat)
+
+        # Set world background to black
+        bpy.context.scene.world.use_nodes = True
+        bpy.context.scene.world.node_tree.nodes["Background"].inputs[0].default_value = (0, 0, 0, 1)  # Black color
+
+        # Render and save the image with object's name
+        file_path = os.path.join(images_dir, f'{obj_name}.png')
+        bpy.context.scene.render.filepath = file_path
+        bpy.ops.render.render(write_still=True)
+        
+        # Cleanup: delete the created camera, light, and material
+        bpy.data.objects.remove(cam_ob)
+        bpy.data.objects.remove(light_ob)
+        bpy.data.materials.remove(mat)
+
+#Opencv shape detection from points    
+def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
+
+    if from_bmesh:
+        # Convert bmesh vertices to numpy array
+        coords_list = np.array([(point.x, point.y, point.z) for point in points])
+    else:
+        coords_list = np.array(points)
+    
+    coords_list = filter_noise_with_dbscan(coords_list)
+    #Convert the floating points to integers
+    int_coords = np.round(coords_list).astype(int)
+
+    #Remove the Z-coordinate 
+    xy_coords = int_coords[:, :2]  
+
+    #Scale the coordinates to increase the shape size
+    scaled_coords = xy_coords * scale_factor
+    
+    #Find min and max bounds for the coordinates for the canvas size
+    min_vals = xy_coords.min(axis=0) * scale_factor  
+    max_vals = xy_coords.max(axis=0) * scale_factor  
+    
+    #Create a binary image
+    img = np.zeros((max_vals[1] - min_vals[1] + scale_factor, max_vals[0] - min_vals[0] + scale_factor), dtype=np.uint8)
+    #Apply gaussian blur
+    img = cv2.GaussianBlur(img, (5, 5), 0)
+    #Shift points based on min_vals to fit within the image
+    shifted_points = scaled_coords  - min_vals + 5  
+
+    #Reshape points to the format needed by fillPoly 
+    reshaped_points = shifted_points.reshape((-1, 1, 2))
+
+    #Draw the shape filled (as white) on the image
+    cv2.fillPoly(img, [reshaped_points], 255)
+
+    #Find contours and select the contour with the maximum area 
+    contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL , cv2.CHAIN_APPROX_SIMPLE)
+    contour = max(contours, key=cv2.contourArea)
+    print(len(contours) , "contours found")
+    #Draw all the contours found on an image
+    contour_image = cv2.cvtColor(img.copy(), cv2.COLOR_GRAY2BGR)  # Convert to a 3-channel image 
+    cv2.drawContours(contour_image, contours, -1, (0, 255, 0), 1)  # Draws contours in green 
+
+    display_contour=False
+    save_countor=True
+    
+    if(display_contour):
+        #Display the image with contours
+        cv2.imshow("Contours", contours)
+        cv2.waitKey(0)  
+        cv2.destroyAllWindows()
+        
+    if(save_countor):
+        # Save the image
+        output_path = output_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'contours', 'contours.png')
+        cv2.imwrite(output_path, contour_image)
+        print("contour saved at ",output_path)
+    
+    #Approximate the contour to a simpler shape
+    epsilon = 0.02 * cv2.arcLength(contour, True)
+    approx = cv2.approxPolyDP(contour, epsilon, True)
+
+    #Based on the number of vertices, determine the shape
+    num_vertices = len(approx)
+    print("number of vertices detected: ",num_vertices)
+    shape = "unknown"
+    if num_vertices == 3:
+        shape="rectangle"
+    if num_vertices == 4:
+        x, y, w, h = cv2.boundingRect(approx)
+        aspectRatio = float(w) / h
+        if 0.95 <= aspectRatio <= 1.05:
+            shape = "square"
         else:
-            coord_3d_start = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-            coord_3d_start.z = objects_z_height  # Set the Z coordinate
+            shape = "rectangle"
 
-        coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-        coord_3d_end.z = objects_z_height  # Set the Z coordinate
-
-        # Create a new mesh object for the line
-        mesh = bpy.data.meshes.new(name="Line Mesh")
-        obj = bpy.data.objects.new("Line Object", mesh)
-
-        # Link it to scene
-        bpy.context.collection.objects.link(obj)
         
-        # Create mesh from python data
-        bm = bmesh.new()
+    #Print the detected shape
+    print(f"Detected shape: {shape}")
 
-        # Add vertices
-        bm.verts.new(coord_3d_start)
-        bm.verts.new(coord_3d_end)
+    return shape
 
-        # Add an edge between the vertices
-        bm.edges.new(bm.verts)
-
-        # Update and free bmesh for memory performance
-        bm.to_mesh(mesh)
-        bm.free()
-
-        # Create a material for the line and set its color
-        material = bpy.data.materials.new(name="Line Material")
-        material.diffuse_color = marking_color  # make sure this color is set accordingly
-        obj.data.materials.append(material)
-
-        self.prev_end_point = coord_3d_end
-        
-        
-        # After the object is created, store it 
-        store_object_state(obj)
-        
-    def cancel(self, context):
-        if context.object:
-            bpy.ops.object.select_all(action='DESELECT')
-            context.view_layer.objects.active = context.object
-            context.object.select_set(True)
-            bpy.ops.object.delete()
-                                 
+#not used
 def draw_polyline_from_points(points, name, color=(0.8, 0.3, 0.3), thickness=0.02):
     # Create a new curve and a new object using that curve
     curve_data = bpy.data.curves.new(name=name, type='CURVE')
@@ -2587,26 +2797,9 @@ def align_shapes(original_coords, perfect_coords):
         matched_vertices.append(original_coords[best_match_idx])
 
     return matched_vertices
-
-def mark_point(point, name="point", size=0.05):
-    # Create a cube to mark the point
-    bpy.ops.mesh.primitive_cube_add(size=size, location=point)
-    marker = bpy.context.active_object
-    marker.name = name
-    
-    # Create a new material with the specified color
-    mat = bpy.data.materials.new(name="MarkerMaterial")
-    mat.diffuse_color = (1.0, 0.0, 0.0, 1.0)  # Red color
-    mat.use_nodes = False  
-
-    # Assign it to the cube
-    if len(marker.data.materials):
-        marker.data.materials[0] = mat
-    else:
-        marker.data.materials.append(mat)
-        
-# Ensure that the lines are not parallel by adding a small value to the denominator
+      
 def perpendicular_bisector_from_line(start, end):
+    # Ensure that the lines are not parallel by adding a small value to the denominator
     midpoint = (start + end) / 2
     dx = end[0] - start[0]
     dy = end[1] - start[1]
@@ -2617,8 +2810,8 @@ def perpendicular_bisector_from_line(start, end):
     intercept = midpoint[1] - slope * midpoint[0]
     return slope, intercept
 
-# If the slopes are too close, they might be considered parallel
 def intersection_of_lines(line1, line2):
+    # If the slopes are too close, they might be considered parallel
     slope1, intercept1 = line1
     slope2, intercept2 = line2
     # If the lines are parallel return a point at infinity
@@ -2794,7 +2987,7 @@ def draw_curved_line_shape(top_left, top_right, highest_top, bottom_left, bottom
     
     # Create a new mesh and link it to the scene
     mesh_data = bpy.data.meshes.new("curved_line_shape_mesh")
-    curve_obj = bpy.data.objects.new("CurvedLineShape", mesh_data)
+    curve_obj = bpy.data.objects.new("Curved Line Shape", mesh_data)
     bpy.context.collection.objects.link(curve_obj)
     
     # Start a bmesh instance
@@ -3335,121 +3528,6 @@ def create_curved_line(coords):
 
     return curve_obj
    
-def is_click_on_white(self, context, location):
-    global points_kdtree, point_colors
-    intensity_threshold = context.scene.intensity_threshold
-
-    # Define the number of nearest neighbors to search for
-    num_neighbors = 20
-    
-    # Use the k-d tree to find the nearest points to the click location
-    _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
-    
-    average_intensity=get_average_intensity(nearest_indices)
-
-    print(average_intensity)
-
-    # If the average intensity is above the threshold, return True (click is on a "white" object)
-    if average_intensity > intensity_threshold:
-        return True
-    else:
-        print("Intensity threshold not met")
-        return False
-    
-def create_triangle_outline(vertices):
-    # Create a new mesh and object for the triangle outline
-    mesh = bpy.data.meshes.new(name="TriangleOutline")
-    obj = bpy.data.objects.new("TriangleOutline", mesh)
-
-    # Link the object to the scene
-    bpy.context.collection.objects.link(obj)
-    bpy.context.view_layer.objects.active = obj
-    obj.select_set(True)
-
-    # Define edges for the triangle outline
-    edges = [(0, 1), (1, 2), (2, 0)]
-
-    # Create the mesh data
-    mesh.from_pydata(vertices, edges, [])  # No faces
-    mesh.update()
-
-    # Ensure the object scale is applied
-    bpy.context.view_layer.objects.active = obj
-    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    
-    '''wireframe_modifier = obj.modifiers.new(name="Wireframe", type='WIREFRAME')
-    wireframe_modifier.thickness = 0.1 # Adjust this value for desired thickness'''
-    
-    return obj
-
-    # Convert list to numpy array for easier manipulation
-    coords_np = np.array(coords_list)
-
-    # Separate the coordinates into x, y, z
-    coords_x = coords_np[:, 0]
-    coords_y = coords_np[:, 1]
-    coords_z = coords_np[:, 2]
-
-    # Create a mask for top half points based on the median y-value
-    top_mask = coords_y >= np.median(coords_y)
-
-    # Use the mask to separate the points
-    top_half = coords_np[top_mask]
-    bottom_half = coords_np[~top_mask]
-
-    #  find the extreme points using all 3D coordinates
-    bottom_right = top_half[np.argmin(top_half[:, 0])]
-    highest_top= top_half[np.argmax(top_half[:, 0])]
-    top_right= top_half[np.argmax(top_half[:, 1])]
-    
-    lowest_bottom= bottom_half[np.argmin(bottom_half[:, 0])]
-    top_left= bottom_half[np.argmax(bottom_half[:, 0])]
-    bottom_left= bottom_half[np.argmin(bottom_half[:, 1])]
-    
-    extreme_points=top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right
-    extreme_point_names="top_left", "bottom_left", "highest_top", "lowest_bottom", "top_right", "bottom_right"
-    for i, point in enumerate(extreme_points):
-        mark_point(point, extreme_point_names[i])
-    return top_left, bottom_left, highest_top, lowest_bottom, top_right, bottom_right
-
-
-    return [top_left, quarter_top, middle_top, three_quarter_top, top_right, 
-            middle_curve, 
-            bottom_right, three_quarter_bottom, middle_bottom, quarter_bottom, bottom_left]
-
-    if num_points < 2:
-        raise ValueError("Number of points must be at least 2")
-
-    coords_np = np.array(coords_list)
-    coords_y = coords_np[:, 1]
-
-    top_mask = coords_y >= np.median(coords_y)
-    top_half = coords_np[top_mask]
-    bottom_half = coords_np[~top_mask]
-
-    # Sort points by x-coordinate
-    top_half_sorted = top_half[np.argsort(top_half[:, 0])]
-    bottom_half_sorted = bottom_half[np.argsort(bottom_half[:, 0])]
-
-    # Ensure that the first and last points are included
-    indices_top = np.round(np.linspace(0, len(top_half_sorted) - 1, num_points)).astype(int)
-    indices_bottom = np.round(np.linspace(0, len(bottom_half_sorted) - 1, num_points)).astype(int)
-
-    # Pair points from top and bottom halves
-    pairs = []
-    for i in range(num_points):
-        top_point = top_half_sorted[indices_top[i]]
-        bottom_point = bottom_half_sorted[indices_bottom[i]]
-        pairs.append((top_point, bottom_point))
-
-    middle_points = []
-    for top_point, bottom_point in pairs:
-        middle_point = (top_point + bottom_point) / 2
-        middle_points.append(middle_point)
-        mark_point(middle_point, "middle_point")
-
-    return middle_points
-
 def find_closest_pairs(top_half, bottom_half):
     pairs = []
     for top_point in top_half:
@@ -3583,56 +3661,6 @@ def locate_middle_points(coords_list, num_points=3):
 
     return middle_points
 
-def create_middle_points(coords_list, num_segments=10):
-    coords_np = np.array(coords_list)
-
-    # Identify the points with extreme x values (leftmost and rightmost)
-    leftmost_x = coords_np[:, 0].min()
-    rightmost_x = coords_np[:, 0].max()
-
-    leftmost_points = coords_np[coords_np[:, 0] == leftmost_x]
-    rightmost_points = coords_np[coords_np[:, 0] == rightmost_x]
-
-    # Identify the top and bottom points among the leftmost and rightmost points
-    top_left = leftmost_points[leftmost_points[:, 1].argmax()]
-    bottom_left = leftmost_points[leftmost_points[:, 1].argmin()]
-    top_right = rightmost_points[rightmost_points[:, 1].argmax()]
-    bottom_right = rightmost_points[rightmost_points[:, 1].argmin()]
-
-    # Initialize the middle points list with the leftmost middle point
-    middle_points = [(top_left + bottom_left) / 2]
-
-    # Divide the remaining line into segments
-    segment_width = (rightmost_x - leftmost_x) / (num_segments - 1)
-
-    for i in range(1, num_segments):
-        # Determine the segment boundaries
-        x_min = leftmost_x + i * segment_width
-        x_max = leftmost_x + (i + 1) * segment_width
-
-        # Filter points in the current segment
-        segment_points = coords_np[(coords_np[:, 0] >= x_min) & (coords_np[:, 0] < x_max)]
-
-        if len(segment_points) > 0:
-            # Find the top and bottom points in this segment
-            top_point = segment_points[segment_points[:, 1].argmax()]
-            bottom_point = segment_points[segment_points[:, 1].argmin()]
-
-            # Calculate the middle point
-            middle_point = (top_point + bottom_point) / 2
-            middle_points.append(middle_point)
-            mark_point(middle_point,"middle_point")
-    # Add the rightmost middle point at the end
-    middle_points.append((top_right + bottom_right) / 2)
-
-
-    mark_point(top_left,"top_left")
-    mark_point(top_right,"top_right")
-    mark_point(bottom_left,"bottom_left")
-    mark_point(bottom_right,"bottom_right")
-    
-    return middle_points
-
 def create_segmented_middle_points(coords_list, segment_length=1):
     coords_np = np.array(coords_list)
 
@@ -3688,85 +3716,3 @@ def create_segmented_middle_points(coords_list, segment_length=1):
 
     return middle_points
 
-def move_triangle_to_line(triangle, line_start, line_end):
-    # Convert inputs to numpy arrays for easier calculations
-    triangle_np = np.array(triangle)
-    line_start_np = np.array(line_start)
-    line_end_np = np.array(line_end)
-
-    # Identify the base vertices (the two closest to the line)
-    base_vertex_indices = find_base_vertices(triangle_np, line_start_np, line_end_np)
-    base_vertices = triangle_np[base_vertex_indices]
-
-    # Find the closest points on the line for the base vertices
-    closest_points = [closest_point(vertex, line_start_np, line_end_np) for vertex in base_vertices]
-
-    # Move the base vertices to the closest points on the line
-    triangle_np[base_vertex_indices] = closest_points
-
-    # Calculate the height of the triangle to reposition the third vertex
-    third_vertex_index = 3 - sum(base_vertex_indices)  # Assuming indices are 0, 1, 2
-    height_vector = triangle_np[third_vertex_index] - np.mean(base_vertices, axis=0)
-    triangle_np[third_vertex_index] = np.mean(closest_points, axis=0) + height_vector
-
-    return triangle_np.tolist()
-
-def find_base_vertices(triangle, line_start, line_end):
-    distances = [np.linalg.norm(closest_point(vertex, line_start, line_end) - vertex) for vertex in triangle]
-    sorted_indices = np.argsort(distances)
-    return sorted_indices[:2]  # Indices of the two closest vertices
-def find_closest_vertex_to_line(triangle, line_start, line_end):
-    min_distance = float('inf')
-    closest_vertex_index = -1
-
-    for i, vertex in enumerate(triangle):
-        closest_point_on_line = closest_point(vertex, line_start, line_end)
-        distance = np.linalg.norm(vertex - closest_point_on_line)
-        if distance < min_distance:
-            min_distance = distance
-            closest_vertex_index = i
-
-    return closest_vertex_index
-
-def find_base_vertex(triangle, line_start, line_end):
-    min_distance = float('inf')
-    base_vertex = None
-    base_index = None
-
-    for i, vertex in enumerate(triangle):
-        closest_point_on_line = closest_point(vertex, line_start, line_end)
-        distance = np.linalg.norm(vertex - closest_point_on_line)
-        if distance < min_distance:
-            min_distance = distance
-            base_vertex = vertex
-            base_index = i
-
-    return base_vertex, base_index
-
-def closest_point(point, line_start, line_end):
-    line_vec = line_end - line_start
-    point_vec = point - line_start
-    line_len = np.linalg.norm(line_vec)
-    line_unitvec = line_vec / line_len
-    point_vec_scaled = point_vec / line_len
-    t = np.dot(line_unitvec, point_vec_scaled)    
-    if t < 0.0:
-        t = 0.0
-    elif t > 1.0:
-        t = 1.0
-    nearest = line_vec * t
-    return line_start + nearest
-
-def move_blender_triangle_objects(new_vertices, line_start, line_end):
-    for obj in bpy.data.objects:
-        if "triangle Shape" in obj.name and obj.type == 'MESH':
-            if len(obj.data.vertices) >= 3:
-                # Assuming the object represents a triangle
-                current_triangle = [obj.data.vertices[i].co for i in range(3)]
-                moved_triangle = move_triangle_to_line(current_triangle, line_start, line_end)
-
-                # Update the vertices of the mesh
-                for i, vertex in enumerate(obj.data.vertices[:3]):
-                    vertex.co = moved_triangle[i]
-            else:
-                print(f"Object '{obj.name}' does not have enough vertices")
