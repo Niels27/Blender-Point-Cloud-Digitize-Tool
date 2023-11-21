@@ -87,7 +87,7 @@ shape_counter=1 #Keeps track of amount of shapes currently in viewport
 objects_z_height=0.5 #Height of all markings
 auto_load=True # Automatically imports a file called auto.laz on every execution 
 auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz
-save_shapes=True
+save_shapes=False
 show_dots=False
 
 #Keeps track of all objects created/removed for undo/redo functions
@@ -828,9 +828,14 @@ class SelectionDetectionOpterator(bpy.types.Operator):
         # After the object is created, store it 
         store_object_state(obj)
         
-class TriangleMarkOperator(bpy.types.Operator):
-    bl_idname = "custom.mark_triangle"
-    bl_label = "Mark Triangle"
+
+        TriangleMarkOperator ._is_running = False  # Reset the flag when the operator is cancelled
+        print("Operator was properly cancelled")  # Debug message
+        return {'CANCELLED'}
+
+class AutoTriangleMarkOperator(bpy.types.Operator):
+    bl_idname = "custom.auto_mark_triangle"
+    bl_label = "Auto Mark Triangle"
     
     _is_running = False  # Class variable to check if the operator is already running
     _triangles = []  # List to store the triangle vertices
@@ -998,6 +1003,127 @@ class TriangleMarkOperator(bpy.types.Operator):
         print("Operator was properly cancelled")  # Debug message
         return {'CANCELLED'}
 
+class TriangleMarkOperator(bpy.types.Operator):
+    bl_idname = "custom.mark_triangle"
+    bl_label = "Mark Triangle"
+    
+    _is_running = False  # Class variable to check if the operator is already running
+    _triangles = []  # List to store the triangle vertices
+    _processed_indices = set()
+    _last_outer_corner = None  # Initialize the last outer corner here   
+         
+    def modal(self, context, event):
+        global point_coords, point_colors, points_kdtree
+        intensity_threshold = context.scene.intensity_threshold
+        
+        if event.type == 'MOUSEMOVE':  
+            self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
+            
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS' and self.mouse_inside_view3d:
+            # Process the mouse click
+            self.process_mouse_click(context, event,intensity_threshold)
+
+        elif event.type == 'ESC':
+            self.cancel(context)
+            return {'CANCELLED'}  # Stop when ESCAPE is pressed
+        
+        return {'RUNNING_MODAL'}
+
+    def process_mouse_click(self, context,event, intensity_threshold):
+        # Get the mouse coordinates
+        x, y = event.mouse_region_x, event.mouse_region_y
+        location = region_2d_to_location_3d(context.region, context.space_data.region_3d, (x, y), (0, 0, 0))
+
+        # Nearest-neighbor search
+        _, nearest_indices = points_kdtree.query([location], k=16)
+        average_intensity = get_average_intensity(nearest_indices[0])
+        average_color = get_average_color(nearest_indices[0])
+        if average_intensity > intensity_threshold or np.all(average_color > 160):
+            # Region growing algorithm
+            checked_indices = set()
+            indices_to_check = list(nearest_indices[0])
+            
+            while indices_to_check:   
+                current_index = indices_to_check.pop()
+                if current_index not in checked_indices:
+                    checked_indices.add(current_index)
+                    intensity = np.average(point_colors[current_index]) * 255
+                    if intensity > intensity_threshold:
+                        _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=50)
+                        indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
+
+            if checked_indices:
+                rectangle_coords = filter_noise_with_dbscan([point_coords[i] for i in checked_indices])
+                self._processed_indices.update(checked_indices)
+                triangle_vertices = create_flexible_triangle(rectangle_coords)
+                self._triangles.append(triangle_vertices)
+                create_shape(rectangle_coords, shape_type="triangle")
+
+                if len(self._triangles) >= 2:
+                    #Check if _last_outer_corner is initialized
+                    if self._last_outer_corner is None:
+                        outer_corners = self.find_outermost_corners(self._triangles[-2], self._triangles[-1])
+                        # Ensure both corners are in the correct format
+                        #outer_corners = [list(corner) for corner in outer_corners]
+                        self._last_outer_corner = outer_corners[1]
+                    else:
+                        #Use the last outer corner and find the new one
+                        new_outer_corner = self.find_outermost_corner(self._triangles[-1], self._last_outer_corner)
+                        outer_corners = [self._last_outer_corner, new_outer_corner]
+                        self._last_outer_corner = new_outer_corner
+
+                    #Ensure outer_corners contains two points, each  a list or tuple
+                    if all(isinstance(corner, (list, tuple)) for corner in outer_corners):
+                        create_polyline("triangles_base_line", outer_corners)
+                        #move_blender_triangle_objects(self._triangles[-1], outer_corners[0],outer_corners[1])
+                        #print("Moved Triangle")
+                    else:
+                        print("Error: outer_corners does not contain valid points")
+                    '''for triangle in self._triangles:
+                        move_blender_triangle_objects(triangle, self._last_outer_corner,new_outer_corner)
+                        print("Moved Triangle")'''
+
+    @staticmethod
+    def find_outermost_corners(triangle1, triangle2):
+        max_distance = 0
+        outermost_points = (None, None)
+
+        for point1 in triangle1:
+            for point2 in triangle2:
+                distance = np.linalg.norm(np.array(point1) - np.array(point2))
+                if distance > max_distance:
+                    max_distance = distance
+                    outermost_points = (point1, point2)
+        return outermost_points
+    @staticmethod
+    def find_outermost_corner(triangle, reference_point):
+        max_distance = 0
+        outermost_point = None
+
+        for point in triangle:
+            distance = np.linalg.norm(np.array(point) - np.array(reference_point))
+            if distance > max_distance:
+                max_distance = distance
+                outermost_point = point
+
+        return outermost_point
+
+    def cancel(self, context):
+        TriangleMarkOperator._is_running = False
+        print("Operation was cancelled")
+
+    def invoke(self, context, event):
+        if TriangleMarkOperator._is_running:
+            self.report({'WARNING'}, "Operator is already running")
+            return {'CANCELLED'}
+
+        if context.area.type == 'VIEW_3D':
+            TriangleMarkOperator._is_running = True
+            context.window_manager.modal_handler_add(self)
+            return {'RUNNING_MODAL'}
+        else:
+            return {'CANCELLED'}        
+        
 class RectangleMarkOperator(bpy.types.Operator):
     bl_idname = "custom.mark_rectangle"
     bl_label = "Mark Rectangle"
@@ -2331,6 +2457,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         layout.operator("custom.mark_fixed_rectangle", text="fixed rectangle marker")
        
         layout.operator("custom.mark_triangle", text="triangle marker")
+        layout.operator("custom.auto_mark_triangle", text="auto triangle marker")
         layout.operator("custom.mark_rectangle", text="rectangle marker")
         layout.operator("custom.mark_curved_line", text="curved line marker") 
         layout.operator("custom.auto_curved_line", text="auto curved line")  
@@ -2362,10 +2489,10 @@ def register():
     bpy.utils.register_class(SimpleMarkOperator)
     bpy.utils.register_class(ComplexMarkOperator)
     bpy.utils.register_class(SelectionDetectionOpterator)
-        
+    bpy.utils.register_class(AutoTriangleMarkOperator) 
+    bpy.utils.register_class(TriangleMarkOperator) 
     bpy.utils.register_class(FixedTriangleMarkOperator) 
     bpy.utils.register_class(FixedRectangleMarkOperator)
-    bpy.utils.register_class(TriangleMarkOperator) 
     bpy.utils.register_class(RectangleMarkOperator)
     bpy.utils.register_class(AutoCurvedLineOperator)
     bpy.utils.register_class(CurvedLineMarkOperator)
@@ -2453,6 +2580,7 @@ def unregister():
     bpy.utils.unregister_class(FixedTriangleMarkOperator)
     bpy.utils.unregister_class(FixedRectangleMarkOperator) 
     bpy.utils.unregister_class(TriangleMarkOperator)
+    bpy.utils.unregister_class(AutoTriangleMarkOperator)
     bpy.utils.unregister_class(RectangleMarkOperator) 
     bpy.utils.unregister_class(AutoCurvedLineOperator)
     bpy.utils.unregister_class(CurvedLineMarkOperator)
