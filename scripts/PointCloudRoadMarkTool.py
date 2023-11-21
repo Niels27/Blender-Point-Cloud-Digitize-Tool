@@ -1013,7 +1013,7 @@ class TriangleMarkOperator(bpy.types.Operator):
     _last_outer_corner = None  # Initialize the last outer corner here   
          
     def modal(self, context, event):
-        global point_coords, point_colors, points_kdtree
+        global point_coords, point_colors, points_kdtree,objects_z_height
         intensity_threshold = context.scene.intensity_threshold
         
         if event.type == 'MOUSEMOVE':  
@@ -1053,12 +1053,11 @@ class TriangleMarkOperator(bpy.types.Operator):
                         indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
 
             if checked_indices:
-                rectangle_coords = filter_noise_with_dbscan([point_coords[i] for i in checked_indices])
                 self._processed_indices.update(checked_indices)
-                triangle_vertices = create_flexible_triangle(rectangle_coords)
-                self._triangles.append(triangle_vertices)
-                create_shape(rectangle_coords, shape_type="triangle")
-
+                current_triangle_coords=[point_coords[i] for i in checked_indices]
+                current_triangle_vertices = create_flexible_triangle(current_triangle_coords)
+                self._triangles.append(current_triangle_vertices)
+                    
                 if len(self._triangles) >= 2:
                     #Check if _last_outer_corner is initialized
                     if self._last_outer_corner is None:
@@ -1075,13 +1074,20 @@ class TriangleMarkOperator(bpy.types.Operator):
                     #Ensure outer_corners contains two points, each  a list or tuple
                     if all(isinstance(corner, (list, tuple)) for corner in outer_corners):
                         create_polyline("triangles_base_line", outer_corners)
-                        #move_blender_triangle_objects(self._triangles[-1], outer_corners[0],outer_corners[1])
-                        #print("Moved Triangle")
+                        current_triangle_vertices = move_triangle_to_line(current_triangle_vertices, outer_corners[0],outer_corners[1])
+                        print("Moved Triangle To Line")
                     else:
                         print("Error: outer_corners does not contain valid points")
-                    '''for triangle in self._triangles:
-                        move_blender_triangle_objects(triangle, self._last_outer_corner,new_outer_corner)
-                        print("Moved Triangle")'''
+                        
+                # Convert all vertices to lists containing three coordinates
+                for vertex in current_triangle_vertices:
+                    if not isinstance(vertex, (list, tuple)) or len(vertex) != 3:
+                        # Convert vertex to a list
+                        vertex = list(vertex)
+                        
+                for vertex in current_triangle_vertices:
+                    current_triangle_coords+=[(vertex[0], vertex[1], vertex[2])]
+                create_shape(current_triangle_coords, shape_type="triangle",vertices=current_triangle_vertices)
 
     @staticmethod
     def find_outermost_corners(triangle1, triangle2):
@@ -1772,7 +1778,7 @@ def create_fixed_snapping_triangle(coords):
             third_vertex = point
 
     # Scale the triangle to the desired size (30x30x30)
-    scale_factor = 0.5 / np.max(pairwise_distances)
+    scale_factor = 0.6 / np.max(pairwise_distances)
     scaled_vertices = (coords_np - center) * scale_factor + center
 
     # Ensuring that the scaled triangle has its vertices in the same orientation as the original
@@ -1845,7 +1851,7 @@ def create_polyline(name, points, width=0.01, color=(1, 0, 0, 1)):
     return curve_obj
 
 #Define a function to create a single mesh for combined rectangles
-def create_shape(coords_list, shape_type):
+def create_shape(coords_list, shape_type,vertices=None):
     
     start_time = time.time()
     marking_color = bpy.context.scene.marking_color 
@@ -1853,16 +1859,23 @@ def create_shape(coords_list, shape_type):
     line_width = context.scene.fatline_width
     shape_coords = None  # Default to original coordinates
     coords_list=filter_noise_with_dbscan(coords_list)
+    
     if shape_type == "triangle":
-        print("Drawing triangle")
-        coords_list = create_flexible_triangle(coords_list)
-        shape_coords=create_fixed_snapping_triangle(coords_list)
+        #flexible_coords = create_flexible_triangle(coords_list)
+        vertices=create_fixed_snapping_triangle(vertices)
         obj=create_mesh_with_material(
-            "triangle Shape", shape_coords,
+            "Triangle Shape", vertices,
             marking_color, transparency)
-        vertices=create_fixed_snapping_triangle(coords_list)
-        obj=create_triangle_outline(vertices)
+        create_triangle_outline(vertices)
         
+    elif shape_type == "flexible triangle":
+        shape_coords = create_flexible_triangle(coords_list)
+        obj=create_mesh_with_material(
+            "flexible triangle", shape_coords,
+            marking_color, transparency)
+        create_triangle_outline(shape_coords)
+        print("Drawing flexible triangle")
+             
     elif shape_type == "rectangle":
         print("Drawing rectangle")
         shape_coords = create_flexible_rectangle(coords_list)
@@ -2186,7 +2199,7 @@ def create_triangle_outline(vertices):
     
     '''wireframe_modifier = obj.modifiers.new(name="Wireframe", type='WIREFRAME')
     wireframe_modifier.thickness = 0.1 # Adjust this value for desired thickness'''
-    
+    store_object_state(obj)
     return obj
 
 def create_middle_points(coords_list, num_segments=10):
@@ -2677,7 +2690,7 @@ def closest_point(point, line_start, line_end):
 
 def move_blender_triangle_objects(new_vertices, line_start, line_end):
     for obj in bpy.data.objects:
-        if "triangle Shape" in obj.name and obj.type == 'MESH':
+        if "Triangle Shape" in obj.name and obj.type == 'MESH':
             if len(obj.data.vertices) >= 3:
                 # Assuming the object represents a triangle
                 current_triangle = [obj.data.vertices[i].co for i in range(3)]
@@ -2688,7 +2701,7 @@ def move_blender_triangle_objects(new_vertices, line_start, line_end):
                     vertex.co = moved_triangle[i]
             else:
                 print(f"Object '{obj.name}' does not have enough vertices")
-       
+                   
 #opencv
 def save_shape_as_image(obj):
     
