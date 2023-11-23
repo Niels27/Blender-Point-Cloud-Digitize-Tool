@@ -869,7 +869,7 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
             radius = 50
             _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
         
-            rectangle_coords = []
+            triangle_coords = []
             
             # Get the average intensity of the nearest points
             average_intensity = get_average_intensity(nearest_indices[0])
@@ -891,7 +891,7 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
                         checked_indices.add(current_index)
                         intensity = np.average(point_colors[current_index]) * 255  # grayscale
                         if intensity>intensity_threshold:
-                            rectangle_coords.append(point_coords[current_index])
+                            triangle_coords.append(point_coords[current_index])
                             _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
                             indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
 
@@ -902,13 +902,13 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
                 print("no road markings found")
                 
 
-            if rectangle_coords:
+            if triangle_coords:
                 #filters out bad points
-                rectangle_coords = filter_noise_with_dbscan(rectangle_coords)
+                filtered_triangle_coords=filter_noise_with_dbscan(triangle_coords)
                 self._processed_indices.update(checked_indices)
-                triangle_vertices = create_flexible_triangle(rectangle_coords)
+                triangle_vertices = create_flexible_triangle(filtered_triangle_coords)
                 self._triangles.append(triangle_vertices)
-                create_shape(rectangle_coords, shape_type="triangle")
+                create_shape(filtered_triangle_coords, shape_type="triangle", vertices=triangle_vertices)
 
                 if len(self._triangles) == 2:
                     outer_corners= self.find_outermost_corners(self._triangles[0], self._triangles[1])
@@ -940,14 +940,14 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
             centers = [np.mean(triangle, axis=0) for triangle in self._triangles[:2]]
             middle_points = self.interpolate_line(centers[0], centers[1])
             for point in middle_points:
-                self.simulate_click_and_grow(point, context, intensity_threshold)
+                self.simulate_click_and_grow(point, context, intensity_threshold, outer_corners)
             #Move triangle down to the base line
             for triangle in self._triangles:
                 move_blender_triangle_objects(triangle, outer_corners[0], outer_corners[1])
-                print("Moved Triangle")
+            print("Moved TriangleS")
                 
                 
-    def simulate_click_and_grow(self, location, context, intensity_threshold):
+    def simulate_click_and_grow(self, location, context, intensity_threshold, outer_corners):
         global point_coords, point_colors, points_kdtree
 
         _, nearest_indices = points_kdtree.query([location], k=16)
@@ -969,16 +969,14 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
                         indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
 
             if checked_indices:
-                points= [point_coords[i] for i in checked_indices]
-                points = filter_noise_with_dbscan(points)
+                points = [point_coords[i] for i in checked_indices]
+                filtered_points = filter_noise_with_dbscan(points)
                 self._processed_indices.update(checked_indices)
-                triangle_vertices = create_flexible_triangle(points)
+                triangle_vertices = create_flexible_triangle(filtered_points)
                 self._triangles.append(triangle_vertices)
                 self._found_triangles += 1
-                create_shape(points, shape_type="triangle")       
-                
-       
-        #return {'PASS_THROUGH'}
+                move_triangle_to_line(triangle_vertices, outer_corners[0], outer_corners[1])
+                create_shape(filtered_points, shape_type="triangle", vertices=triangle_vertices)
         
     def interpolate_line(self, start, end, num_points=50):
         # Generate points along the line between start and end
@@ -1033,7 +1031,7 @@ class TriangleMarkOperator(bpy.types.Operator):
         # Get the mouse coordinates
         x, y = event.mouse_region_x, event.mouse_region_y
         location = region_2d_to_location_3d(context.region, context.space_data.region_3d, (x, y), (0, 0, 0))
-
+        triangle_coords=[]
         # Nearest-neighbor search
         _, nearest_indices = points_kdtree.query([location], k=16)
         average_intensity = get_average_intensity(nearest_indices[0])
@@ -1049,13 +1047,16 @@ class TriangleMarkOperator(bpy.types.Operator):
                     checked_indices.add(current_index)
                     intensity = np.average(point_colors[current_index]) * 255
                     if intensity > intensity_threshold:
+                        triangle_coords.append(point_coords[current_index])
                         _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=50)
                         indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
 
-            if checked_indices:
+            if triangle_coords:
+  
+                #current_triangle_coords=[point_coords[i] for i in checked_indices]
+                filtered_current_triangle_coords=filter_noise_with_dbscan(triangle_coords)
                 self._processed_indices.update(checked_indices)
-                current_triangle_coords=[point_coords[i] for i in checked_indices]
-                current_triangle_vertices = create_flexible_triangle(current_triangle_coords)
+                current_triangle_vertices = create_flexible_triangle(filtered_current_triangle_coords)
                 self._triangles.append(current_triangle_vertices)
                     
                 if len(self._triangles) >= 2:
@@ -1085,9 +1086,10 @@ class TriangleMarkOperator(bpy.types.Operator):
                         # Convert vertex to a list
                         vertex = list(vertex)
                         
+                new_triangle_coords=[]  
                 for vertex in current_triangle_vertices:
-                    current_triangle_coords+=[(vertex[0], vertex[1], vertex[2])]
-                create_shape(current_triangle_coords, shape_type="triangle",vertices=current_triangle_vertices)
+                    new_triangle_coords+=[(vertex[0], vertex[1], vertex[2])]
+                create_shape(new_triangle_coords, shape_type="triangle",vertices=current_triangle_vertices)
 
     @staticmethod
     def find_outermost_corners(triangle1, triangle2):
@@ -1596,7 +1598,7 @@ class FixedTriangleMarkOperator(bpy.types.Operator):
 
                 # Get the z coordinate from 3d space
                 z = location.z
-                create_fixed_triangle(context, location, size=0.5)
+                draw_fixed_triangle(context, location, size=0.5)
           
             else:
                 return {'PASS_THROUGH'}
@@ -1682,6 +1684,9 @@ def get_average_color(indices):
     return average_color
 
 def create_flexible_triangle(coords):
+    
+    #filter bad points
+    #coords=filter_noise_with_dbscan(coords)
     # Convert coords to numpy array for efficient operations
     coords_np = np.array(coords)
     
@@ -1719,7 +1724,7 @@ def create_flexible_rectangle(coords):
     west = min(vertices, key=lambda p: p[0])
     return [north, east, south, west]
 
-def create_fixed_triangle(context, location, size=1.0):
+def draw_fixed_triangle(context, location, size=1.0):
     global objects_z_height
     # Create new mesh and object
     mesh = bpy.data.meshes.new('FixedTriangle')
@@ -1751,40 +1756,23 @@ def create_fixed_triangle(context, location, size=1.0):
     mat.diffuse_color = (1, 0, 0, 1)  # Red color with full opacity
     obj.data.materials.append(mat)   
     
-def create_fixed_snapping_triangle(coords):
+def create_fixed_triangle(coords, side_length=0.5):
     # Convert coords to numpy array for efficient operations
     coords_np = np.array(coords)
 
-    # Calculate the center of the triangle
-    center = np.mean(coords_np, axis=0)
+    # Choose the first vertex as the reference
+    vertex1 = coords_np[0]
 
-    # Compute pairwise distances
-    pairwise_distances = np.linalg.norm(coords_np[:, np.newaxis] - coords_np, axis=2)
+    # Calculate the direction vectors for the other two vertices
+    # Assuming a equilateral triangle, the angle between sides is 60 degrees
+    angle = np.deg2rad(60)
+    direction_vector = np.array([np.cos(angle), np.sin(angle), 0])  # Assuming 2D triangle in XY plane
 
-    # Find the two points that are the furthest apart
-    max_dist_indices = np.unravel_index(np.argmax(pairwise_distances), pairwise_distances.shape)
-    vertex1 = coords_np[max_dist_indices[0]]
-    vertex2 = coords_np[max_dist_indices[1]]
+    # Calculate the second and third vertices
+    vertex2 = vertex1 + np.array([side_length, 0, 0])  # Second vertex along the x-axis
+    vertex3 = vertex1 + direction_vector * side_length  # Third vertex at a 60-degree angle
 
-    # Compute the third vertex
-    third_vertex = None
-    max_distance = 0
-    for point in coords_np:
-        diff = point - vertex1
-        proj = np.dot(diff, (vertex2 - vertex1) / np.linalg.norm(vertex2 - vertex1))
-        distance_to_line = np.linalg.norm(diff - proj)
-        if distance_to_line > max_distance:
-            max_distance = distance_to_line
-            third_vertex = point
-
-    # Scale the triangle to the desired size (30x30x30)
-    scale_factor = 0.6 / np.max(pairwise_distances)
-    scaled_vertices = (coords_np - center) * scale_factor + center
-
-    # Ensuring that the scaled triangle has its vertices in the same orientation as the original
-    scaled_vertex1, scaled_vertex2, scaled_third_vertex = scaled_vertices
-
-    return [scaled_vertex1.tolist(), scaled_vertex2.tolist(), scaled_third_vertex.tolist()]         
+    return [vertex1.tolist(), vertex2.tolist(), vertex3.tolist()]   
     
 def create_fixed_square(context, location, size=1.0):
     # Create new mesh and object
@@ -1862,18 +1850,18 @@ def create_shape(coords_list, shape_type,vertices=None):
     
     if shape_type == "triangle":
         #flexible_coords = create_flexible_triangle(coords_list)
-        vertices=create_fixed_snapping_triangle(vertices)
+        vertices=create_fixed_triangle(vertices)
         obj=create_mesh_with_material(
             "Triangle Shape", vertices,
             marking_color, transparency)
         create_triangle_outline(vertices)
         
     elif shape_type == "flexible triangle":
-        shape_coords = create_flexible_triangle(coords_list)
+        vertices = create_flexible_triangle(coords_list)
         obj=create_mesh_with_material(
-            "flexible triangle", shape_coords,
+            "flexible triangle", vertices,
             marking_color, transparency)
-        create_triangle_outline(shape_coords)
+        create_triangle_outline(vertices)
         print("Drawing flexible triangle")
              
     elif shape_type == "rectangle":
@@ -2113,7 +2101,7 @@ def is_mouse_in_3d_view(context, event):
 
     return False  # Default to False if checks fail.        
  
-def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=20):
+def filter_noise_with_dbscan(coords_list, eps=0.04, min_samples=20):
     
     #DBSCAN clustering
     db = DBSCAN(eps=eps, min_samples=min_samples).fit(coords_list)
@@ -2129,8 +2117,8 @@ def filter_noise_with_dbscan(coords_list, eps=0.05, min_samples=20):
     original_count = len(coords_list)
     filtered_count = len(filtered_coords)
     removed_count = original_count - filtered_count
-
-    print(f"Points have been filtered. Original amount: {original_count}, Removed: {removed_count}")
+    if(removed_count>0 and original_count>3):
+        print(f"Points have been filtered. Original amount: {original_count}, Removed: {removed_count}")
 
     return filtered_coords
 
