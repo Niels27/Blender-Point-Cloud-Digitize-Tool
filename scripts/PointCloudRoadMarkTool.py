@@ -85,6 +85,7 @@ collection_name = "Collection" #the default collection name in blender
 point_cloud_point_size =  1
 shape_counter=1 #Keeps track of amount of shapes currently in viewport
 objects_z_height=0.5 #Height of all markings
+z_cut_off=0.5 #meters of point cloud height to display
 auto_load=True # Automatically imports a file called auto.laz on every execution 
 auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz
 save_shapes=False
@@ -155,7 +156,7 @@ def pointcloud_load(path, point_size, sparsity_value):
   
     # Store point data and colors globally
     point_coords = points_ar
-    point_colors = colors_ar
+    point_colors = colors_ar*255
     original_coords = points_a
     point_cloud_point_size = point_size
     
@@ -209,7 +210,134 @@ def pointcloud_load(path, point_size, sparsity_value):
     except Exception as e:
         # Handle any other exceptions that might occur
         print(f"An error occurred: {e}")
-             
+ 
+def pointcloud_load_optimized(path, point_size, sparsity_value):
+    start_time = time.time()
+    print("Started loading point cloud..")
+    global point_coords, point_colors, original_coords, points_kdtree, z_cut_off
+    
+    base_file_name = os.path.basename(path)
+    directory_path = os.path.dirname(path)
+    saved_data_path = os.path.join(directory_path, "Stored Data")
+    file_name_points = base_file_name + "_points.npy"
+    file_name_colors = base_file_name + "_colors.npy"
+    file_name_avg_coords = base_file_name + "_avgCoords.npy"
+    file_name_kdtree = base_file_name + "_kdtree.joblib"
+
+    if not os.path.exists(saved_data_path):
+        os.mkdir(saved_data_path)
+    
+    if not os.path.exists(os.path.join(saved_data_path, file_name_points)):
+        point_cloud = lp.read(path)
+        points_a = np.vstack((point_cloud.x, point_cloud.y, point_cloud.z)).transpose()
+        colors_a = np.vstack((point_cloud.red, point_cloud.green, point_cloud.blue)).transpose() / 65535
+        # Convert points to float32
+        points_a = points_a.astype(np.float32)
+        # Convert colors to uint8
+        colors_a = (colors_a * 255).astype(np.uint8)
+        
+        # Sort the points based on the Z coordinate
+        sorted_points = points_a[points_a[:, 2].argsort()]
+
+        # Determine the cutoff index for the lowest 10%
+        cutoff_index = int(len(sorted_points) * 0.1)
+
+        # Calculate the average Z value of the lowest 10% of points
+        road_base_level = np.mean(sorted_points[:cutoff_index, 2])
+
+        print("Estimated road base level:", road_base_level)
+        
+        # Filter points with Z coordinate > 0.5
+        print("Number of points before filtering:", len(points_a))
+        mask = points_a[:, 2] <= (road_base_level+z_cut_off)
+        points_a = points_a[mask]
+        colors_a = colors_a[mask]
+        print("Number of points after filtering:", len(points_a))
+        
+        #Shifting coords
+        points_a_avg = np.mean(points_a, axis=0)
+        points_a = points_a - points_a_avg
+        
+        #Storing Shifting coords 
+        np.save(os.path.join(saved_data_path, file_name_avg_coords), points_a_avg)
+    
+        #Storing the arrays as npy file
+        np.save(os.path.join(saved_data_path, file_name_points), points_a)
+        np.save(os.path.join(saved_data_path, file_name_colors), colors_a)
+
+    else:
+        points_a = np.load(os.path.join(saved_data_path, file_name_points))
+        colors_a = np.load(os.path.join(saved_data_path, file_name_colors))
+
+    print("point cloud loaded in: ", time.time() - start_time)
+    
+    # Load all points but display only half of them
+    if sparsity_value == 1:
+        displayed_indices = np.random.choice(len(points_a), len(points_a) // 2, replace=False)
+        displayed_points= points_a[displayed_indices]
+        displayed_colors = colors_a[displayed_indices]
+        points_ar = points_a
+        colors_ar = colors_a
+    else:
+        points_ar = points_a[:: sparsity_value]
+        colors_ar = colors_a[:: sparsity_value]
+        
+    # Store point data and colors globally
+    point_coords = points_ar
+    point_colors = colors_ar
+    original_coords = points_a
+    point_cloud_point_size = point_size
+    
+    # KDTree handling
+    kdtree_path = os.path.join(saved_data_path, file_name_kdtree)
+    points_kdtree = load_kdtree_from_file(kdtree_path)
+    if points_kdtree is None:
+        # Create the kdtree if it doesn't exist
+        points_kdtree = cKDTree(np.array(point_coords))
+        print("kdtree created in: ", time.time() - start_time)
+        # Save the kdtree to a file
+        save_kdtree_to_file(kdtree_path, points_kdtree)
+        print("kdtree saved in: ", time.time() - start_time, "at", kdtree_path)
+         
+    try: 
+        draw_handler = bpy.app.driver_namespace.get('my_draw_handler')
+        
+        if draw_handler is None:
+            # Assuming colors_ar is in uint8 format
+            displayed_colors = displayed_colors / 255.0  # Normalize to 0-1 range
+            #Converting to tuple 
+            coords = tuple(map(tuple, displayed_points))
+            colors = tuple(map(tuple, displayed_colors))
+            
+            shader = gpu.shader.from_builtin('3D_FLAT_COLOR')
+            batch = batch_for_shader(
+                shader, 'POINTS',
+                {"pos": coords, "color": colors}
+            )
+            
+            #Make sure the viewport is cleared before rendering
+            #redraw_viewport()
+
+            # Inside the draw function
+            def draw():
+                gpu.state.point_size_set(point_size)
+                bgl.glEnable(bgl.GL_DEPTH_TEST)
+                batch.draw(shader)
+                bgl.glDisable(bgl.GL_DEPTH_TEST)
+                
+            #Define draw handler to acces the drawn point cloud later on
+            draw_handler = bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW')
+            #Store the draw handler reference in the driver namespace
+            bpy.app.driver_namespace['my_draw_handler'] = draw_handler
+            
+            print("openGL point cloud drawn in:",time.time() - start_time) 
+            
+        else:
+            print("Draw handler already exists, skipping drawing")
+    except Exception as e:
+        # Handle any other exceptions that might occur
+        print(f"An error occurred: {e}")     
+                             
 class CreatePointCloudObjectOperator(bpy.types.Operator):
     
     bl_idname = "custom.create_point_cloud_object"
@@ -272,7 +400,7 @@ class CreatePointCloudObjectOperator(bpy.types.Operator):
         color_layer = mesh.vertex_colors.active.data
         for i, loop in enumerate(mesh.loops):
           color = colors_ar[i] if i < len(colors_ar) else (1.0, 1.0, 1.0)
-          color*=255
+          #color*=255
           color_layer[loop.index].color = color + (1.0,)
 
       # Assign the material to the mesh
@@ -410,7 +538,7 @@ class GetPointsInfoOperator(bpy.types.Operator):
                 average_intensity = get_average_intensity(nearest_indices[0])
                 # Calculate the average color
                 average_color = np.mean(nearest_colors, axis=0)
-                average_color*=255
+                #average_color*=255
                 
                 clicked_on_white = "Clicked on roadmark" if is_click_on_white(self, context, location) else "No roadmark detected"
                     
@@ -483,7 +611,7 @@ class SimpleMarkOperator(bpy.types.Operator):
                     current_index = indices_to_check.pop()
                     if current_index not in checked_indices:
                         checked_indices.add(current_index)
-                        intensity = np.average(point_colors[current_index]) * 255  # grayscale
+                        intensity = np.average(point_colors[current_index]) #* 255  # grayscale
                         if intensity>intensity_threshold:
                             rectangle_coords.append(point_coords[current_index])
                             _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
@@ -582,7 +710,7 @@ class ComplexMarkOperator(bpy.types.Operator):
                         current_index = indices_to_check.pop()
                         if current_index not in checked_indices:
                             checked_indices.add(current_index)
-                            intensity = np.average(point_colors[current_index]) * 255  # grayscale
+                            intensity = np.average(point_colors[current_index]) #* 255  # grayscale
                             if intensity>intensity_threshold:
                                 rectangle_coords.append(point_coords[current_index])
                                 _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
@@ -653,7 +781,7 @@ class FindALlRoadMarkingsOperator(bpy.types.Operator):
             if idx in checked_indices:
                 continue
 
-            intensity = np.average(color) * 255  
+            intensity = np.average(color) #* 255  
             if intensity > intensity_threshold:
                 rectangle_coords = []
                 indices_to_check = [idx]
@@ -661,7 +789,7 @@ class FindALlRoadMarkingsOperator(bpy.types.Operator):
                     current_index = indices_to_check.pop()
                     if current_index not in checked_indices:
                         checked_indices.add(current_index)
-                        intensity = np.average(point_colors[current_index]) * 255
+                        intensity = np.average(point_colors[current_index]) #* 255
                         if intensity > intensity_threshold:
                             rectangle_coords.append(point_coords[current_index])
                             _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
@@ -761,7 +889,7 @@ class SelectionDetectionOpterator(bpy.types.Operator):
         max_white_objects = 100
 
         # Intensity calculation
-        intensities = np.mean(filtered_colors, axis=1) * 255  
+        intensities = np.mean(filtered_colors, axis=1) #* 255  
         checked_indices = set()
         all_white_object_coords = []
         white_objects_count = 0 
@@ -780,7 +908,7 @@ class SelectionDetectionOpterator(bpy.types.Operator):
                 current_index = indices_to_check.pop()
                 if current_index not in checked_indices:
                     checked_indices.add(current_index)
-                    intensity = np.average(filtered_colors[current_index]) * 255
+                    intensity = np.average(filtered_colors[current_index]) #* 255
                     if intensity > intensity_threshold:
                         rectangle_coords.append(filtered_points[current_index])
                         _, neighbor_indices = filtered_kdtree.query([filtered_points[current_index]], k=radius)
@@ -889,7 +1017,7 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
                     current_index = indices_to_check.pop()
                     if current_index not in checked_indices:
                         checked_indices.add(current_index)
-                        intensity = np.average(point_colors[current_index]) * 255  # grayscale
+                        intensity = np.average(point_colors[current_index]) #* 255  # grayscale
                         if intensity>intensity_threshold:
                             triangle_coords.append(point_coords[current_index])
                             _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
@@ -963,7 +1091,7 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
                 current_index = indices_to_check.pop()
                 if current_index not in checked_indices:
                     checked_indices.add(current_index)
-                    intensity = np.average(point_colors[current_index]) * 255
+                    intensity = np.average(point_colors[current_index]) #* 255
                     if intensity > intensity_threshold:
                         _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=50)
                         indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
@@ -1045,7 +1173,7 @@ class TriangleMarkOperator(bpy.types.Operator):
                 current_index = indices_to_check.pop()
                 if current_index not in checked_indices:
                     checked_indices.add(current_index)
-                    intensity = np.average(point_colors[current_index]) * 255
+                    intensity = np.average(point_colors[current_index]) #* 255
                     if intensity > intensity_threshold:
                         triangle_coords.append(point_coords[current_index])
                         _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=50)
@@ -1184,7 +1312,7 @@ class RectangleMarkOperator(bpy.types.Operator):
                     current_index = indices_to_check.pop()
                     if current_index not in checked_indices:
                         checked_indices.add(current_index)
-                        intensity = np.average(point_colors[current_index]) * 255  # grayscale
+                        intensity = np.average(point_colors[current_index]) #* 255  # grayscale
                         if intensity>intensity_threshold:
                             rectangle_coords.append(point_coords[current_index])
                             _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
@@ -1359,7 +1487,7 @@ def snap_to_road_mark(self, context, first_click_point, last_click_point, click_
             current_index = indices_to_check.pop()
             if current_index not in checked_indices:
                 checked_indices.add(current_index)
-                point_intensity = np.average(point_colors[current_index]) * 255
+                point_intensity = np.average(point_colors[current_index]) #* 255
                 if point_intensity > threshold:
                     region_points.append(point_coords[current_index])
                     _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
@@ -1535,7 +1663,7 @@ class AutoCurvedLineOperator(bpy.types.Operator):
                     current_index = indices_to_check.pop()
                     if current_index not in checked_indices:
                         checked_indices.add(current_index)
-                        intensity = np.average(point_colors[current_index]) * 255  # grayscale
+                        intensity = np.average(point_colors[current_index]) #* 255  # grayscale
                         if intensity>intensity_threshold:
                             rectangle_coords.append(point_coords[current_index])
                             _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
@@ -1669,7 +1797,7 @@ def get_average_intensity(indices):
     point_amount = len(indices)
     for index in indices:
         
-        intensity = np.average(point_colors[index]) * 255  
+        intensity = np.average(point_colors[index]) #* 255  
         total_intensity += intensity
 
     return total_intensity / point_amount
@@ -1678,7 +1806,7 @@ def get_average_color(indices):
     point_amount=len(indices)
     average_color = np.zeros(3, dtype=float)
     for index in indices:
-        color = point_colors[index] * 255  # rgb
+        color = point_colors[index] #* 255  # rgb
         average_color += color
     average_color /= point_amount
     return average_color
@@ -1757,23 +1885,35 @@ def draw_fixed_triangle(context, location, size=1.0):
     obj.data.materials.append(mat)   
     
 def create_fixed_triangle(coords, side_length=0.5):
-    # Convert coords to numpy array for efficient operations
+     # Convert coords to numpy array for efficient operations
     coords_np = np.array(coords)
 
-    # Choose the first vertex as the reference
+    # Reference vertex (first vertex)
     vertex1 = coords_np[0]
 
-    # Calculate the direction vectors for the other two vertices
-    # Assuming a equilateral triangle, the angle between sides is 60 degrees
-    angle = np.deg2rad(60)
-    direction_vector = np.array([np.cos(angle), np.sin(angle), 0])  # Assuming 2D triangle in XY plane
+    # Normal vector of the plane defined by the original triangle
+    normal_vector = np.cross(coords_np[1] - vertex1, coords_np[2] - vertex1)
+    normal_vector = normal_vector / np.linalg.norm(normal_vector)  # Normalize the normal vector
 
-    # Calculate the second and third vertices
-    vertex2 = vertex1 + np.array([side_length, 0, 0])  # Second vertex along the x-axis
-    vertex3 = vertex1 + direction_vector * side_length  # Third vertex at a 60-degree angle
+    # Direction vector for the second vertex
+    dir_vector = coords_np[1] - vertex1
+    dir_vector = dir_vector / np.linalg.norm(dir_vector) * side_length
 
-    return [vertex1.tolist(), vertex2.tolist(), vertex3.tolist()]   
-    
+    # Calculate the position of the second vertex
+    vertex2 = vertex1 + dir_vector
+
+    # Direction vector for the third vertex
+    # Use cross product to find a perpendicular vector in the plane
+    perp_vector = np.cross(normal_vector, dir_vector)
+    perp_vector = perp_vector / np.linalg.norm(perp_vector) * side_length
+
+    # Angle for equilateral triangle (60 degrees)
+    angle_rad = np.deg2rad(60)
+
+    # Calculate the position of the third vertex
+    vertex3 = vertex1 + np.cos(angle_rad) * dir_vector + np.sin(angle_rad) * perp_vector
+
+    return [vertex1.tolist(), vertex2.tolist(), vertex3.tolist()]
 def create_fixed_square(context, location, size=1.0):
     # Create new mesh and object
     mesh = bpy.data.meshes.new('FixedSquare')
@@ -2283,15 +2423,15 @@ class LAS_OT_OpenOperator(bpy.types.Operator):
 
     filepath: bpy.props.StringProperty(subtype="FILE_PATH")
     
+    
     def execute(self, context):
-        redraw_viewport()
         start_time = time.time()
+        redraw_viewport()
         bpy.context.scene["Filepath to the loaded pointcloud"] = self.filepath
         sparsity_value = bpy.context.scene.sparsity_value
         point_size = bpy.context.scene.point_size
-        pointcloud_load(self.filepath, point_size, sparsity_value)
-        print("Opening LAS file: ", self.filepath)
-        print("--- %s seconds ---" % (time.time() - start_time))
+        pointcloud_load_optimized(self.filepath, point_size, sparsity_value)
+        print("Opened LAS file: ", self.filepath,"in %s seconds" % (time.time() - start_time))
         return {'FINISHED'}
 
     def invoke(self, context, event):
@@ -2318,10 +2458,13 @@ class LAS_OT_AutoOpenOperator(bpy.types.Operator):
 # Function to load KDTree from a file
 def load_kdtree_from_file(file_path):
     if os.path.exists(file_path):
+        print("Existing kdtree found. Loading...")
+        start_time = time.time()
         with open(file_path, 'r') as file:
             kdtree_data = json.load(file)
         # Convert the loaded points back to a Numpy array
         points = np.array(kdtree_data['points'])
+        print("Loaded kdtree in: %s seconds" % (time.time() - start_time),"from: ",file_path)
         return cKDTree(points)
     else:
         return None
@@ -2340,6 +2483,7 @@ def save_kdtree_to_file(file_path, kdtree):
             context.view_layer.objects.active = context.object
             context.object.select_set(True)
             bpy.ops.object.delete()
+    print("saved kdtree to",file_path)
 
 def store_object_state(obj):
     save_shape_as_image(obj)
