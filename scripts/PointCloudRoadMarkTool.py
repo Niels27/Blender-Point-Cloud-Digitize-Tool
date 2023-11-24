@@ -213,7 +213,7 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
     print("Started loading point cloud..")
     global point_coords, point_colors, original_coords, points_kdtree, z_cut_off
     points_percentage=context.scene.points_percentage
-    
+    print("points_percentage",points_percentage)
     base_file_name = os.path.basename(path)
     directory_path = os.path.dirname(path)
     saved_data_path = os.path.join(directory_path, "Stored Data")
@@ -237,10 +237,10 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
         # Sort the points based on the Z coordinate
         sorted_points = points_a[points_a[:, 2].argsort()]
 
-        # Determine the cutoff index for the lowest 10%
+        # Determine the cutoff index for the lowest %
         cutoff_index = int(len(sorted_points) * 0.1)
 
-        # Calculate the average Z value of the lowest 10% of points
+        # Calculate the average Z value of the lowest % of points
         road_base_level = np.mean(sorted_points[:cutoff_index, 2])
 
         print("Estimated road base level:", road_base_level)
@@ -317,9 +317,6 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
                 {"pos": coords, "color": colors}
             )
             
-            #Make sure the viewport is cleared before rendering
-            #redraw_viewport()
-
             # Inside the draw function
             def draw():
                 gpu.state.point_size_set(point_size)
@@ -1976,15 +1973,15 @@ def create_flexible_triangle(coords):
     # Convert coords to numpy array for efficient operations
     coords_np = np.array(coords)
     
-    # Compute the pairwise distances
+    #calculate the pairwise distances
     pairwise_distances = np.linalg.norm(coords_np[:, np.newaxis] - coords_np, axis=2)
     
-    # Find the two points that are the furthest apart
+    #find the two points that are the furthest apart
     max_dist_indices = np.unravel_index(np.argmax(pairwise_distances), pairwise_distances.shape)
     vertex1 = coords_np[max_dist_indices[0]]
     vertex2 = coords_np[max_dist_indices[1]]
     
-    # For each point, compute its distance to the line formed by vertex1 and vertex2
+    # for each point, compute its distance to the line formed by vertex1 and vertex2
     line_vector = vertex2 - vertex1
     line_vector /= np.linalg.norm(line_vector)  # normalize
     max_distance = 0
@@ -3136,11 +3133,12 @@ def save_shape_as_image(obj):
         file_path = os.path.join(images_dir, f'{obj_name}.png')
         bpy.context.scene.render.filepath = file_path
         bpy.ops.render.render(write_still=True)
-        
+        print("saved image to: ",file_path)
         # Cleanup: delete the created camera, light, and material
         bpy.data.objects.remove(cam_ob)
         bpy.data.objects.remove(light_ob)
         bpy.data.materials.remove(mat)
+        print("deleted camera, light, and material")
 
 #Opencv shape detection from points    
 def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
