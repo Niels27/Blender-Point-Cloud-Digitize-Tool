@@ -86,10 +86,7 @@ point_cloud_point_size =  1
 shape_counter=1 #Keeps track of amount of shapes currently in viewport
 objects_z_height=0.5 #Height of all markings
 z_cut_off=0.5 #meters of point cloud height to display
-auto_load=True # Automatically imports a file called auto.laz on every execution 
 auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz
-save_shapes=False
-show_dots=False
 
 #Keeps track of all objects created/removed for undo/redo functions
 undo_stack = []
@@ -215,6 +212,7 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
     start_time = time.time()
     print("Started loading point cloud..")
     global point_coords, point_colors, original_coords, points_kdtree, z_cut_off
+    points_percentage=context.scene.points_percentage
     
     base_file_name = os.path.basename(path)
     directory_path = os.path.dirname(path)
@@ -273,7 +271,11 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
     
     # Load all points but display only half of them
     if sparsity_value == 1:
-        displayed_indices = np.random.choice(len(points_a), len(points_a) // 2, replace=False)
+        
+        # Convert the display percentage to a number of points
+        number_of_points_to_display = int(len(points_a) * (points_percentage / 100))
+
+        displayed_indices = np.random.choice(len(points_a), number_of_points_to_display, replace=False)
         displayed_points= points_a[displayed_indices]
         displayed_colors = colors_a[displayed_indices]
         points_ar = points_a
@@ -303,7 +305,7 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
         draw_handler = bpy.app.driver_namespace.get('my_draw_handler')
         
         if draw_handler is None:
-            # Assuming colors_ar is in uint8 format
+            # colors_ar should be in uint8 format
             displayed_colors = displayed_colors / 255.0  # Normalize to 0-1 range
             #Converting to tuple 
             coords = tuple(map(tuple, displayed_points))
@@ -602,7 +604,7 @@ class SimpleMarkOperator(bpy.types.Operator):
             print("average color: ", average_color,"average intensity: " ,average_intensity)
             
             # Check if the average intensity indicates a road marking (white)
-            if average_intensity > intensity_threshold or np.all(average_color > 160):
+            if average_intensity > intensity_threshold:
                 # Region growing algorithm
                 checked_indices = set()
                 indices_to_check = list(nearest_indices[0])
@@ -694,14 +696,11 @@ class ComplexMarkOperator(bpy.types.Operator):
                            
                  # Get the average color of the nearest points
                 average_color = get_average_color(nearest_indices[0])
-                
-                #rgb treshold
-                color_treshhold=160
-                
+                    
                 print("average color: ", average_color,"average intensity: " ,average_intensity)
                 
                 # Check if the average intensity indicates a road marking (white)
-                if average_intensity > intensity_threshold or np.all(average_color > color_treshhold):
+                if average_intensity > intensity_threshold:
                     # Region growing algorithm
                     checked_indices = set()
                     indices_to_check = list(nearest_indices[0])
@@ -865,8 +864,8 @@ class SelectionDetectionOpterator(bpy.types.Operator):
             return {'CANCELLED'}
     
     def find_white_objects_within_region(self):
-        # Your global variables (adjust as per actual implementation)
-        global point_coords, point_colors, points_kdtree 
+       
+        global point_coords, point_colors, points_kdtree,intensity_threshold
 
         # Define bounding box limits
         min_corner = np.min(self.region_corners, axis=0)
@@ -883,11 +882,10 @@ class SelectionDetectionOpterator(bpy.types.Operator):
         print("Number of points in the bounding box:", len(filtered_points))
         
         # Parameters
-        intensity_threshold = 160  
         point_threshold = 100
         radius = 100
         max_white_objects = 100
-
+        intensity_threshold=intensity_threshold
         # Intensity calculation
         intensities = np.mean(filtered_colors, axis=1) #* 255  
         checked_indices = set()
@@ -1008,7 +1006,7 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
             print("average color: ", average_color,"average intensity: " ,average_intensity)
             
             # Check if the average intensity indicates a road marking (white)
-            if average_intensity > intensity_threshold or np.all(average_color > 160):
+            if average_intensity > intensity_threshold:
                 # Region growing algorithm
                 checked_indices = set()
                 indices_to_check = list(nearest_indices[0])
@@ -1044,10 +1042,8 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
                     self.perform_automatic_marking(context, intensity_threshold,outer_corners)
                 
         elif event.type == 'ESC':
-            SimpleMarkOperator._is_running = False
-            print("Operation was cancelled")
+            self.cancel(context)
             return {'CANCELLED'}  # Stop when ESCAPE is pressed
-        
         return {'RUNNING_MODAL'}
     
     @staticmethod
@@ -1082,7 +1078,7 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
         average_intensity = get_average_intensity(nearest_indices[0])
         average_color = get_average_color(nearest_indices[0])
 
-        if (average_intensity > intensity_threshold or np.all(average_color > 160)) and not self._processed_indices.intersection(nearest_indices[0]):
+        if (average_intensity > intensity_threshold) and not self._processed_indices.intersection(nearest_indices[0]):
             # Proceed only if the intensity is above the threshold and the area hasn't been processed yet
             checked_indices = set()
             indices_to_check = list(nearest_indices[0])
@@ -1113,19 +1109,19 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
 
     
     def invoke(self, context, event):
-        if TriangleMarkOperator ._is_running:
+        if AutoTriangleMarkOperator ._is_running:
             self.report({'WARNING'}, "Operator is already running")
             return {'CANCELLED'}  # Do not run the operator if it's already running
 
         if context.area.type == 'VIEW_3D':
-            TriangleMarkOperator ._is_running = True  # Set the flag to indicate the operator is running
+            AutoTriangleMarkOperator ._is_running = True  # Set the flag to indicate the operator is running
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
 
     def cancel(self, context):
-        TriangleMarkOperator ._is_running = False  # Reset the flag when the operator is cancelled
+        AutoTriangleMarkOperator ._is_running = False  # Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  # Debug message
         return {'CANCELLED'}
 
@@ -1164,7 +1160,7 @@ class TriangleMarkOperator(bpy.types.Operator):
         _, nearest_indices = points_kdtree.query([location], k=16)
         average_intensity = get_average_intensity(nearest_indices[0])
         average_color = get_average_color(nearest_indices[0])
-        if average_intensity > intensity_threshold or np.all(average_color > 160):
+        if average_intensity > intensity_threshold:
             # Region growing algorithm
             checked_indices = set()
             indices_to_check = list(nearest_indices[0])
@@ -1303,7 +1299,7 @@ class RectangleMarkOperator(bpy.types.Operator):
             print("average color: ", average_color,"average intensity: " ,average_intensity)
             
             # Check if the average intensity indicates a road marking (white)
-            if average_intensity > intensity_threshold or np.all(average_color > 160):
+            if average_intensity > intensity_threshold:
                 # Region growing algorithm
                 checked_indices = set()
                 indices_to_check = list(nearest_indices[0])
@@ -1353,7 +1349,169 @@ class RectangleMarkOperator(bpy.types.Operator):
         SimpleMarkOperator._is_running = False  # Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  # Debug message
         return {'CANCELLED'}
+
+class AutoRectangleMarkOperator(bpy.types.Operator):
+    bl_idname = "custom.auto_mark_rectangle"
+    bl_label = "Auto Mark rectangle"
     
+    _is_running = False  # Class variable to check if the operator is already running
+    _rectangles = []  # List to store the rectangle vertices
+    _simulated_clicks = 0  # Count of simulated clicks
+    _found_rectangles = 0   # Count of triangles found
+    _processed_indices = set()
+                
+    def modal(self, context, event):
+        global point_coords, point_colors, points_kdtree
+        intensity_threshold = context.scene.intensity_threshold
+        
+        if event.type == 'MOUSEMOVE':  
+            self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
+            
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
+            
+            start_time = time.time()
+            # Get the mouse coordinates
+            x, y = event.mouse_region_x, event.mouse_region_y
+            # Convert 2D mouse coordinates to 3D view coordinates
+            view3d = context.space_data
+            region = context.region
+            region_3d = context.space_data.region_3d
+            location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
+
+            # Get the z coordinate from 3D space
+            z = location.z
+
+            # Do a nearest-neighbor search
+            num_neighbors = 16  # Number of neighbors 
+            radius = 50
+            _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
+        
+            rectangle_coords = []
+            
+            # Get the average intensity of the nearest points
+            average_intensity = get_average_intensity(nearest_indices[0])
+           
+             # Get the average color of the nearest points
+            average_color = get_average_color(nearest_indices[0])
+             
+            print("average color: ", average_color,"average intensity: " ,average_intensity)
+            
+            # Check if the average intensity indicates a road marking (white)
+            if average_intensity > intensity_threshold:
+                # Region growing algorithm
+                checked_indices = set()
+                indices_to_check = list(nearest_indices[0])
+                print("Region growing started")
+                while indices_to_check:   
+                    current_index = indices_to_check.pop()
+                    if current_index not in checked_indices:
+                        checked_indices.add(current_index)
+                        intensity = np.average(point_colors[current_index]) #* 255  # grayscale
+                        if intensity>intensity_threshold:
+                            rectangle_coords.append(point_coords[current_index])
+                            _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
+                            indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
+
+                print("Region growing completed", time.time()-start_time)
+         
+            
+            else:
+                print("no road markings found")
+                
+
+            if rectangle_coords:
+                #filters out bad points
+                #filtered_rectangle_coords=filter_noise_with_dbscan(rectangle_coords)
+                self._processed_indices.update(checked_indices)
+                rectangle_vertices = create_flexible_rectangle(rectangle_coords)
+                self._rectangles.append(rectangle_vertices)
+                create_shape(rectangle_coords, shape_type="rectangle")
+
+                if len(self._rectangles) == 2:
+                    #center_points= self.find_center_points(self._rectangles[0], self._rectangles[1])
+                    self.perform_automatic_marking(context, intensity_threshold)
+                
+        elif event.type == 'ESC':
+            self.cancel(context)
+            return {'CANCELLED'}  # Stop when ESCAPE is pressed
+        
+        return {'RUNNING_MODAL'}
+    
+    @staticmethod
+    def find_center_points(rectangle1, rectangle2):
+        max_distance = 0
+        center_points = (None, None)
+
+        for point1 in rectangle1:
+            for point2 in rectangle2:
+                distance = np.linalg.norm(np.array(point1) - np.array(point2))
+                if distance > max_distance:
+                    max_distance = distance
+                    center_points = (point1, point2)
+        return center_points
+    
+    def perform_automatic_marking(self, context, intensity_threshold):
+        print("2 rectangles found, starting automatic marking..")
+        if len(self._rectangles) >= 2:
+            centers = [np.mean(rectangle, axis=0) for rectangle in self._rectangles[:2]]
+            middle_points = self.interpolate_line(centers[0], centers[1])
+            for point in middle_points:
+                mark_point(point,"ZebraCrossing",size=0.1)
+                self.simulate_click_and_grow(point, context, intensity_threshold)            
+                
+    def simulate_click_and_grow(self, location, context, intensity_threshold):
+        global point_coords, point_colors, points_kdtree
+
+        _, nearest_indices = points_kdtree.query([location], k=16)
+        average_intensity = get_average_intensity(nearest_indices[0])
+        average_color = get_average_color(nearest_indices[0])
+
+        if (average_intensity > intensity_threshold) and not self._processed_indices.intersection(nearest_indices[0]):
+            # Proceed only if the intensity is above the threshold and the area hasn't been processed yet
+            checked_indices = set()
+            indices_to_check = list(nearest_indices[0])
+
+            while indices_to_check:
+                current_index = indices_to_check.pop()
+                if current_index not in checked_indices:
+                    checked_indices.add(current_index)
+                    intensity = np.average(point_colors[current_index]) #* 255
+                    if intensity > intensity_threshold:
+                        _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=50)
+                        indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
+
+            if checked_indices:
+                rectangle_points = [point_coords[i] for i in checked_indices]
+                #filtered_points = filter_noise_with_dbscan(points)
+                self._processed_indices.update(checked_indices)
+                rectangle_vertices = create_flexible_rectangle(rectangle_points)
+                self._rectangles.append(rectangle_vertices)
+                self._found_rectangles += 1
+                create_shape(rectangle_points, shape_type="rectangle")
+        
+    def interpolate_line(self, start, end, num_points=20):
+        # Generate points along the line between start and end
+        return [start + t * (end - start) for t in np.linspace(0, 1, num_points)]
+
+
+    
+    def invoke(self, context, event):
+        if AutoRectangleMarkOperator ._is_running:
+            self.report({'WARNING'}, "Operator is already running")
+            return {'CANCELLED'}  # Do not run the operator if it's already running
+
+        if context.area.type == 'VIEW_3D':
+            AutoRectangleMarkOperator ._is_running = True  # Set the flag to indicate the operator is running
+            context.window_manager.modal_handler_add(self)
+            return {'RUNNING_MODAL'}
+        else:
+            return {'CANCELLED'}
+
+    def cancel(self, context):
+        AutoRectangleMarkOperator ._is_running = False  # Reset the flag when the operator is cancelled
+        print("Operator was properly cancelled")  # Debug message
+       
+        
 class CurvedLineMarkOperator(bpy.types.Operator):
     bl_idname = "custom.mark_curved_line"
     bl_label = "Mark curved line"
@@ -1654,7 +1812,7 @@ class AutoCurvedLineOperator(bpy.types.Operator):
             print("average color: ", average_color,"average intensity: " ,average_intensity)
             
             # Check if the average intensity indicates a road marking (white)
-            if average_intensity > intensity_threshold or np.all(average_color > 160):
+            if average_intensity > intensity_threshold:
                 # Region growing algorithm
                 checked_indices = set()
                 indices_to_check = list(nearest_indices[0])
@@ -2007,6 +2165,7 @@ def create_shape(coords_list, shape_type,vertices=None):
     elif shape_type == "rectangle":
         print("Drawing rectangle")
         shape_coords = create_flexible_rectangle(coords_list)
+        #shape_coords=create_fixed_rectangle_old(shape_coords)
         obj=create_mesh_with_material(
             "rectangle Shape", shape_coords,
             marking_color, transparency)
@@ -2264,7 +2423,7 @@ def filter_noise_with_dbscan(coords_list, eps=0.04, min_samples=20):
 
 def mark_point(point, name="point", size=0.05):
     
-    global show_dots
+    show_dots=context.scene.show_dots
     
     if show_dots:
         # Create a cube to mark the point
@@ -2386,7 +2545,7 @@ class RemoveAllMarkingsOperator(bpy.types.Operator):
     bl_label = "Remove All Lines"
 
     def execute(self, context):
-        global rshape_counter
+        global shape_counter
         bpy.ops.object.select_all(action='DESELECT')
         bpy.ops.object.select_by_type(type='CURVE')
         for obj in bpy.context.scene.objects:
@@ -2441,7 +2600,6 @@ class LAS_OT_OpenOperator(bpy.types.Operator):
 class LAS_OT_AutoOpenOperator(bpy.types.Operator):
     bl_idname = "wm.las_auto_open"
     bl_label = "Auto Open LAS File"
-
     def execute(self, context):
 
         if not os.path.exists(auto_las_file_path):
@@ -2522,6 +2680,35 @@ def redraw_viewport():
                 area.tag_redraw()        
                 
     print("viewport redrawn")
+
+class CenterPointCloudOperator(bpy.types.Operator):
+    bl_idname = "custom.center_pointcloud"
+    bl_label = "Center the Point Cloud in Viewport"
+
+    def execute(self, context):
+       
+        global point_coords
+
+        # Calculate the bounding box of the point cloud
+        min_coords = np.min(point_coords, axis=0)
+        max_coords = np.max(point_coords, axis=0)
+        bbox_center = (min_coords + max_coords) / 2
+
+        # Get the active 3D view
+        for area in bpy.context.screen.areas:
+            if area.type == 'VIEW_3D':
+                break
+        else:
+            self.report({'WARNING'}, "No 3D View found")
+            return {'CANCELLED'}
+
+        # Set the view to look at the bounding box center from above at a height of 10 meters
+        view3d = area.spaces[0]
+        view3d.region_3d.view_location = (bbox_center[0], bbox_center[1], 10)  # X, Y, 10 meters height
+        #view3d.region_3d.view_rotation = bpy.context.scene.camera.rotation_euler  # Maintaining the current rotation
+        view3d.region_3d.view_distance = 10  # Distance from the view point
+
+        return {'FINISHED'}
             
 class OBJECT_OT_simple_undo(bpy.types.Operator):
     bl_idname = "object.simple_undo"
@@ -2573,6 +2760,8 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         scene = context.scene
         
         layout.operator("wm.las_open", text="Import Point Cloud")
+        layout.prop(scene, "points_percentage")
+        layout.operator("custom.center_pointcloud", text="Center Point Cloud")
         layout.operator("custom.create_point_cloud_object", text="Create Point Cloud object")
         layout.operator("custom.remove_point_cloud", text="Remove point cloud")
         layout.operator("custom.remove_all_markings", text="Remove All markings")
@@ -2604,15 +2793,21 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         layout.operator("custom.mark_triangle", text="triangle marker")
         layout.operator("custom.auto_mark_triangle", text="auto triangle marker")
         layout.operator("custom.mark_rectangle", text="rectangle marker")
+        layout.operator("custom.auto_mark_rectangle", text="auto rectangle marker")
         layout.operator("custom.mark_curved_line", text="curved line marker") 
         layout.operator("custom.auto_curved_line", text="auto curved line")  
         row = layout.row(align=True)
         row.operator("object.simple_undo", text="Undo")
         row.operator("object.simple_redo", text="Redo")
-            
+        row = layout.row()
+        row.prop(scene, "auto_load")
+        row = layout.row()
+        row.prop(scene, "save_shape") 
+        row = layout.row()
+        row.prop(scene, "show_dots")
                
          # Dummy space
-        for _ in range(20): 
+        for _ in range(5): 
             layout.label(text="")
             
 # Register the operators and panel
@@ -2639,18 +2834,13 @@ def register():
     bpy.utils.register_class(FixedTriangleMarkOperator) 
     bpy.utils.register_class(FixedRectangleMarkOperator)
     bpy.utils.register_class(RectangleMarkOperator)
+    bpy.utils.register_class(AutoRectangleMarkOperator)
     bpy.utils.register_class(AutoCurvedLineOperator)
     bpy.utils.register_class(CurvedLineMarkOperator)
     bpy.utils.register_class(CorrectionPopUpOperator)
+    bpy.utils.register_class(CenterPointCloudOperator)
 
 
-    
-    """bpy.types.Scene.operator_is_running = bpy.props.BoolProperty(
-        name="Operator Is Running",
-        description="A flag to indicate whether the operator is running",
-        default=False
-    )"""
-    
     bpy.types.Scene.intensity_threshold = bpy.props.FloatProperty(
         name="Intensity Threshold",
         description="Minimum intensity threshold",
@@ -2658,10 +2848,19 @@ def register():
         min=0,  # Minimum value
         subtype='UNSIGNED'  
     )
+   
     bpy.types.Scene.markings_threshold = bpy.props.IntProperty(
         name="Max:",
         description="Maximum markings amount",
         default=30,  # Default value
+        min=1, # Minimum value
+        max=100, # Max value  
+        subtype='UNSIGNED' 
+    )
+    bpy.types.Scene.points_percentage = bpy.props.IntProperty(
+        name="Points percentage:",
+        description="Percentage of points rendered",
+        default=50,  # Default value
         min=1, # Minimum value
         max=100, # Max value  
         subtype='UNSIGNED' 
@@ -2702,6 +2901,24 @@ def register():
     name="User Input Result",
     description="Stores the result from the user input pop-up",
 )
+    bpy.types.Scene.save_shape = bpy.props.BoolProperty(
+        name="Save Shapes",
+        description="Toggle saving shapes",
+        default=False,
+        subtype='UNSIGNED'  
+    )
+    bpy.types.Scene.auto_load = bpy.props.BoolProperty(
+        name="Auto load auto.laz",
+        description="Toggle auto loading auto.laz",
+        default=False,
+        subtype='UNSIGNED'  
+    )
+    bpy.types.Scene.show_dots = bpy.props.BoolProperty(
+        name="Show Dots",
+        description="Toggle showing dots",
+        default=False,
+        subtype='UNSIGNED'  
+    )
     bpy.utils.register_class(FindALlRoadMarkingsOperator)
     bpy.utils.register_class(OBJECT_OT_simple_undo)
     bpy.utils.register_class(OBJECT_OT_simple_redo)
@@ -2727,10 +2944,12 @@ def unregister():
     bpy.utils.unregister_class(TriangleMarkOperator)
     bpy.utils.unregister_class(AutoTriangleMarkOperator)
     bpy.utils.unregister_class(RectangleMarkOperator) 
+    bpy.utils.unregister_class(AutoRectangleMarkOperator) 
     bpy.utils.unregister_class(AutoCurvedLineOperator)
     bpy.utils.unregister_class(CurvedLineMarkOperator)
     bpy.utils.unregister_class(CreatePointCloudObjectOperator)
     bpy.utils.unregister_class(CorrectionPopUpOperator)
+    bpy.utils.unregister_class(CenterPointCloudOperator)
     
     del bpy.types.Scene.marking_transparency
     del bpy.types.Scene.marking_color
@@ -2738,6 +2957,10 @@ def unregister():
     del bpy.types.Scene.markings_threshold
     del bpy.types.Scene.fatline_width
     del bpy.types.Scene.user_input_result
+    del bpy.types.Scene.save_shape
+    del bpy.types.Scene.auto_load
+    del bpy.types.Scene.show_dots
+    del bpy.types.Scene.points_percentage
     
     bpy.utils.unregister_class(OBJECT_OT_simple_undo)
     bpy.utils.unregister_class(OBJECT_OT_simple_redo)
@@ -2745,7 +2968,7 @@ def unregister():
 if __name__ == "__main__":
     register()
     
-    if(auto_load):
+    if(context.scene.auto_load):
         bpy.ops.wm.las_auto_open()
         
  
@@ -2767,7 +2990,7 @@ def move_triangle_to_line(triangle, line_start, line_end):
     triangle_np[base_vertex_indices] = closest_points
 
     # Calculate the height of the triangle to reposition the third vertex
-    third_vertex_index = 3 - sum(base_vertex_indices)  # Assuming indices are 0, 1, 2
+    third_vertex_index = 3 - sum(base_vertex_indices)  #  indices should be 0, 1, 2
     height_vector = triangle_np[third_vertex_index] - np.mean(base_vertices, axis=0)
     triangle_np[third_vertex_index] = np.mean(closest_points, axis=0) + height_vector
 
@@ -2837,13 +3060,12 @@ def move_blender_triangle_objects(new_vertices, line_start, line_end):
 #opencv
 def save_shape_as_image(obj):
     
-    global save_shapes
     obj_name=obj.name
-    
+    save_shape_checkbox = context.scene.save_shape
     if obj_name =="Thin Line":
         return
     
-    if save_shapes:
+    if save_shape_checkbox:
         # Ensure the object exists
         if not obj:
             raise ValueError(f"Object {obj_name} not found.")
@@ -3425,8 +3647,6 @@ def draw_curved_rectangle(top_left, highest_top, top_right, bottom_left, lowest_
     bm.from_mesh(combined_mesh_obj.data)
     
     # Add the closing edges (if not already present)
-    # This is a simple implementation, might need to be adapted based on your specific geometry
-    # It assumes the last vertex of the top and the first of the bottom should be connected and vice versa
     verts_top = [v for v in bm.verts if v.co.z == max(v.co.z for v in bm.verts)]
     verts_bottom = [v for v in bm.verts if v.co.z == min(v.co.z for v in bm.verts)]
     bmesh.ops.contextual_create(bm, geom=[verts_top[-1], verts_bottom[0]])
