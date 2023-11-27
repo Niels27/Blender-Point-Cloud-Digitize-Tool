@@ -57,6 +57,7 @@ from scipy.spatial.distance import cdist
 from mathutils import Vector
 import mathutils
 import pickle
+import gzip
 import pandas as pd
 import geopandas as gpd
 from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
@@ -84,9 +85,10 @@ points_kdtree = None #The loaded ckdtree of coords that all functions can access
 collection_name = "Collection" #the default collection name in blender
 point_cloud_point_size =  1
 shape_counter=1 #Keeps track of amount of shapes currently in viewport
-objects_z_height=0.5 #Height of all markings
+objects_z_height=0.3 #Height of all markings
 z_cut_off=0.5 #meters of point cloud height to display
 auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz
+use_pickled_kdtree=True #compress files to save disk space
 
 #Keeps track of all objects created/removed for undo/redo functions
 undo_stack = []
@@ -211,9 +213,8 @@ def pointcloud_load(path, point_size, sparsity_value):
 def pointcloud_load_optimized(path, point_size, sparsity_value):
     start_time = time.time()
     print("Started loading point cloud..")
-    global point_coords, point_colors, original_coords, points_kdtree, z_cut_off
+    global point_coords, point_colors, original_coords, points_kdtree, z_cut_off,use_pickled_kdtree
     points_percentage=context.scene.points_percentage
-    print("points_percentage",points_percentage)
     base_file_name = os.path.basename(path)
     directory_path = os.path.dirname(path)
     saved_data_path = os.path.join(directory_path, "Stored Data")
@@ -221,7 +222,8 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
     file_name_colors = base_file_name + "_colors.npy"
     file_name_avg_coords = base_file_name + "_avgCoords.npy"
     file_name_kdtree = base_file_name + "_kdtree.joblib"
-
+    file_name_kdtree_pickle = base_file_name + "_kdtree.gz"
+    
     if not os.path.exists(saved_data_path):
         os.mkdir(saved_data_path)
     
@@ -290,17 +292,39 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
     original_coords = points_a
     point_cloud_point_size = point_size
     
-    # KDTree handling
-    kdtree_path = os.path.join(saved_data_path, file_name_kdtree)
-    points_kdtree = load_kdtree_from_file(kdtree_path)
-    if points_kdtree is None:
-        # Create the kdtree if it doesn't exist
-        points_kdtree = cKDTree(np.array(point_coords))
-        print("kdtree created in: ", time.time() - start_time)
-        # Save the kdtree to a file
-        save_kdtree_to_file(kdtree_path, points_kdtree)
-        print("kdtree saved in: ", time.time() - start_time, "at", kdtree_path)
+    # Function to save KD-tree with pickle and gzip
+    def save_kdtree_pickle_gzip(file_path, kdtree):
+        with gzip.open(file_path, 'wb', compresslevel=1) as f:  #  compresslevel 
+            pickle.dump(kdtree, f)
+    # Function to load KD-tree with pickle and gzip
+    def load_kdtree_pickle_gzip(file_path):
+        with gzip.open(file_path, 'rb') as f:
+            return pickle.load(f)  
+
+    if(use_pickled_kdtree):
+        # KDTree handling
+        kdtree_pickle_path = os.path.join(saved_data_path, file_name_kdtree_pickle)
+        if points_kdtree is None:
+            # Create the kdtree if it doesn't exist
+            points_kdtree = cKDTree(np.array(point_coords))
+            save_kdtree_pickle_gzip(kdtree_pickle_path, points_kdtree)
+            print("KD-tree saved with pickle and gzip at:", kdtree_pickle_path)  
+        else:
+            points_kdtree = load_kdtree_pickle_gzip(kdtree_pickle_path)
+            print("KD-tree loaded from pickle and gzip file")
+    else:  
+        # KDTree handling
+        kdtree_path = os.path.join(saved_data_path, file_name_kdtree)
+        points_kdtree = load_kdtree_from_file(kdtree_path)
+        if points_kdtree is None:
+            # Create the kdtree if it doesn't exist
+            points_kdtree = cKDTree(np.array(point_coords))
+            print("kdtree created in: ", time.time() - start_time)
+            # Save the kdtree to a file
+            save_kdtree_to_file(kdtree_path, points_kdtree)
+            print("kdtree saved in: ", time.time() - start_time, "at", kdtree_path)
          
+        
     try: 
         draw_handler = bpy.app.driver_namespace.get('my_draw_handler')
         
@@ -530,7 +554,7 @@ class GetPointsInfoOperator(bpy.types.Operator):
                 z = location.z
 
                 # Perform nearest-neighbor search
-                radius=20
+                radius=5
                 _, nearest_indices = points_kdtree.query([location], k=radius)
                 nearest_colors = [point_colors[i] for i in nearest_indices[0]]
 
@@ -1606,24 +1630,15 @@ def draw_line(self, context, event):
             print(f"Mouseclick {self.click_counter - 1} is not on a white road mark, Mouseclick {self.click_counter} is on.")
             wrong_click="first"
             bpy.ops.wm.correction_pop_up('INVOKE_DEFAULT', start_point=coord_3d_start, end_point=coord_3d_end, click_to_correct=wrong_click)
-                
-        else:
-            print(f"Neither Mouseclick {self.click_counter - 1} nor Mouseclick {self.click_counter} are on a white road mark.")
-            wrong_click="both"
-            bpy.ops.wm.correction_pop_up('INVOKE_DEFAULT', start_point=coord_3d_start, end_point=coord_3d_end, click_to_correct=wrong_click)
-
 
     #Update the previous end point to be the current one for the next click
     self.prev_end_point = coord_3d_end
     
-def snap_to_road_mark(self, context, first_click_point, last_click_point, click_to_correct,region_radius=10):
+def snap_to_road_mark(self, context, first_click_point, last_click_point, click_to_correct,region_radius=2):
     
     intensity_threshold = context.scene.intensity_threshold
     
-    global point_coords, point_colors, points_kdtree
-        
-    '''if self.prev_end_point is None:
-        raise ValueError("Previous click point is not set")'''
+    global point_coords, point_colors, points_kdtree        
 
     #Get the direction vector between the two clicks and its perpendicular
     direction = (last_click_point - first_click_point).normalized()
@@ -1631,8 +1646,7 @@ def snap_to_road_mark(self, context, first_click_point, last_click_point, click_
 
     #Find the index of the last click point in the point cloud
     _, idx = points_kdtree.query([last_click_point], k=1)
-    
-        
+         
     def region_grow(start_point, radius, threshold):
         checked_indices = set()
         indices_to_check = [start_point]
@@ -1647,8 +1661,6 @@ def snap_to_road_mark(self, context, first_click_point, last_click_point, click_
                     region_points.append(point_coords[current_index])
                     _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
                     indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
-        '''for point in region_points:
-            mark_point(point,"regionpoint",0.01)'''
         return region_points
     
     def find_outward_points(region_points, direction):
@@ -1664,21 +1676,15 @@ def snap_to_road_mark(self, context, first_click_point, last_click_point, click_
         region = region_grow(idx[0], region_radius, intensity_threshold)
         if region:
             edge1, edge2 = find_outward_points(region, perp_direction)
-            mark_point(edge1,"edge1",0.02)
-            mark_point(edge2,"edge2",0.02)
+
             #Calculate the new click point based on the edges
             _last_click_point = (edge1 + edge2) * 0.5
             _last_click_point = Vector((_last_click_point[0], _last_click_point[1], _last_click_point[2]))
         else:
             print("No points found to project.")
-            
         mark_point(_first_click_point,"_first_click_point",0.02)
         mark_point(_last_click_point,"_last_click_point",0.02)
         return _first_click_point, _last_click_point
-
-    if(click_to_correct=="none"): 
-        new_first_click_point, new_last_click_point = snap_last_point(first_click_point,last_click_point)
-        return new_first_click_point, new_last_click_point
     
     def snap_first_point(_first_click_point, _last_click_point):
         
@@ -1703,15 +1709,15 @@ def snap_to_road_mark(self, context, first_click_point, last_click_point, click_
         return new_first_click_point, new_last_click_point    
     elif(click_to_correct=="first"):
         new_first_click_point, new_last_click_point = snap_first_point(first_click_point,last_click_point)
-        return new_first_click_point, new_last_click_point   
         print("first point corrected")
-        return first_click_point, last_click_point
+        return new_first_click_point, new_last_click_point   
     elif(click_to_correct=="second"):
+        new_first_click_point, new_last_click_point = snap_last_point(first_click_point,last_click_point)
         print("second point corrected")
-        return first_click_point, last_click_point
-    elif(click_to_correct=="both"):
-        print("both points corrected")
-        return first_click_point, last_click_point
+        return new_first_click_point, new_last_click_point    
+   
+   
+   
 
 # Custom operator for the pop-up dialog
 class CorrectionPopUpOperator(bpy.types.Operator):
@@ -1753,13 +1759,13 @@ class CorrectionPopUpOperator(bpy.types.Operator):
         # Based on the user's choice, either draw or initiate a correction process
         context.scene.user_input_result = self.action
        
-        if self.action == 'CORRECT' or click_to_correct=="none":
+        if self.action == 'CORRECT':
             coord_3d_start, coord_3d_end = snap_to_road_mark(self,context, coord_3d_start, coord_3d_end, click_to_correct)
-        
-        if self.action == ('CANCEL'):
-            print("Canceled line drawing")
-        else:
             create_rectangle_line_object(coord_3d_start, coord_3d_end)
+        
+        elif self.action == ('CANCEL'):
+            print("Canceled line drawing")
+            return {'CANCELLED'}
         
         return {'FINISHED'}
 
@@ -2130,7 +2136,7 @@ def create_polyline(name, points, width=0.01, color=(1, 0, 0, 1)):
     mat = bpy.data.materials.new(name + "_Mat")
     mat.diffuse_color = color
     curve_obj.data.materials.append(mat)
-
+    store_object_state(curve_obj)
     return curve_obj
 
 #Define a function to create a single mesh for combined rectangles
@@ -2438,13 +2444,14 @@ def mark_point(point, name="point", size=0.05):
             marker.data.materials[0] = mat
         else:
             marker.data.materials.append(mat)
+        store_object_state(marker)
 
 def is_click_on_white(self, context, location):
     global points_kdtree, point_colors
     intensity_threshold = context.scene.intensity_threshold
 
     # Define the number of nearest neighbors to search for
-    num_neighbors = 20
+    num_neighbors = 5
     
     # Use the k-d tree to find the nearest points to the click location
     _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
@@ -2606,7 +2613,7 @@ class LAS_OT_AutoOpenOperator(bpy.types.Operator):
         sparsity_value = bpy.context.scene.sparsity_value
         point_size = bpy.context.scene.point_size
         print("Opening LAS file:", auto_las_file_path)
-        pointcloud_load(auto_las_file_path, point_size, sparsity_value)
+        pointcloud_load_optimized(auto_las_file_path, point_size, sparsity_value)
         print("Finished opening LAS file:", auto_las_file_path)
         return {'FINISHED'}
 
