@@ -7,6 +7,7 @@ library_list = [
     'mathutils',
     'pandas',
     'geopandas',
+    'shapely',
     'scikit-learn',
     'joblib',
     'opencv-python'
@@ -14,6 +15,8 @@ library_list = [
 
 #imports
 import sys
+print(sys.executable)
+print(sys.version)
 import subprocess
 import os 
 
@@ -25,6 +28,15 @@ def install_libraries(library_list):
             print(f"Successfully installed {library}")
         except subprocess.CalledProcessError as e:
             print(f"Error installing {library}: {e}")
+            
+def update_libraries(library_list):
+    for library in library_list:
+        try:
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install','--upgrade', library])
+            print(f"Successfully updated {library}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error updating {library}: {e}")
+            
 def uninstall_libraries(library_list):
     for library in library_list:
         try:
@@ -32,9 +44,10 @@ def uninstall_libraries(library_list):
             print(f"Successfully uninstall {library}")
         except subprocess.CalledProcessError as e:
             print(f"Error uninstall {library}: {e}")                    
-# uncomment to install/uninstall libraries 
-#install_libraries('library_list')    
-#uninstall_libraries('library name'):
+
+#install_libraries()    
+#update_libraries() 
+#uninstall_libraries()  
 
 #imports
 import bpy
@@ -51,10 +64,11 @@ import time
 import math
 import laspy as lp
 import scipy
+import shapely
 from scipy.spatial import KDTree
 from scipy.spatial import cKDTree
 from scipy.spatial.distance import cdist
-from mathutils import Vector
+from mathutils import Vector, Matrix
 import mathutils
 import pickle
 import gzip
@@ -76,17 +90,20 @@ import json
 import cv2
 from sklearn.cluster import DBSCAN 
 from scipy.interpolate import UnivariateSpline, make_interp_spline,CubicSpline
+from shapely.geometry import Point
 
 #Global variables 
-point_coords = None
-point_colors = None
-original_coords = None
+point_coords = None # The coordinates of the point cloud, stored as a numpy array
+point_colors = None # The colors of the point cloud, stored as a numpy array
+original_coords = None # The original coords of the point cloud, before shifting
 points_kdtree = None #The loaded ckdtree of coords that all functions can access
 collection_name = "Collection" #the default collection name in blender
-point_cloud_point_size =  1
+point_cloud_name= None # Used when storing files related to current point cloud
+point_cloud_point_size =  1 # The size of the points in the point cloud
 shape_counter=1 #Keeps track of amount of shapes currently in viewport
 objects_z_height=0.3 #Height of all markings
-z_cut_off=0.5 #meters of point cloud height to display
+cut_off_z=True #cut off points above a certain height
+z_cut_off_amt=0.5 #meters of point cloud height to display
 auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz
 use_pickled_kdtree=True #compress files to save disk space
 
@@ -105,9 +122,10 @@ def pointcloud_load(path, point_size, sparsity_value):
     
     start_time = time.time()
     
-    global point_coords, point_colors, original_coords, points_kdtree #draw_handler
+    global point_coords, point_colors, original_coords, points_kdtree, point_cloud_name 
    
     base_file_name = os.path.basename(path)
+    point_cloud_name = base_file_name
     directory_path = os.path.dirname(path)
     saved_data_path = os.path.join(directory_path, "Stored Data")
     file_name_points = base_file_name + "_points.npy"
@@ -209,13 +227,17 @@ def pointcloud_load(path, point_size, sparsity_value):
     except Exception as e:
         # Handle any other exceptions that might occur
         print(f"An error occurred: {e}")
- 
+
+#Function to load the point cloud, store it's data and draw it using openGL, optimized version
 def pointcloud_load_optimized(path, point_size, sparsity_value):
+    
     start_time = time.time()
-    print("Started loading point cloud..")
-    global point_coords, point_colors, original_coords, points_kdtree, z_cut_off,use_pickled_kdtree
+    print("Started loading point cloud.."),
+    global point_coords, point_colors, original_coords, points_kdtree, cut_off_z, z_cut_off_amt,use_pickled_kdtree,point_cloud_name,point_cloud_point_size
     points_percentage=context.scene.points_percentage
+    
     base_file_name = os.path.basename(path)
+    point_cloud_name = base_file_name
     directory_path = os.path.dirname(path)
     saved_data_path = os.path.join(directory_path, "Stored Data")
     file_name_points = base_file_name + "_points.npy"
@@ -247,31 +269,38 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
 
         print("Estimated road base level:", road_base_level)
         
-        # Filter points with Z coordinate > 0.5
-        print("Number of points before filtering:", len(points_a))
-        mask = points_a[:, 2] <= (road_base_level+z_cut_off)
-        points_a = points_a[mask]
-        colors_a = colors_a[mask]
-        print("Number of points after filtering:", len(points_a))
+        if(cut_off_z):
+            # Filter points with Z coordinate > 0.5
+            print("Number of points before filtering:", len(points_a))
+            mask = points_a[:, 2] <= (road_base_level+z_cut_off_amt)
+            points_a = points_a[mask]
+            colors_a = colors_a[mask]
+            print("Number of points after filtering:", len(points_a))
         
+        # Store the original coordinates 
+        original_coords = np.copy(points_a)
+               
         #Shifting coords
         points_a_avg = np.mean(points_a, axis=0)
+        # Create a cube at the centroid location
+        #bpy.ops.mesh.primitive_cube_add(size=2, enter_editmode=False, align='WORLD', location=points_a_avg)
         points_a = points_a - points_a_avg
+        #print(points_a[:5])
         
         #Storing Shifting coords 
         np.save(os.path.join(saved_data_path, file_name_avg_coords), points_a_avg)
     
-        #Storing the arrays as npy file
+        #Storing the centered coordinate arrays as npy file
         np.save(os.path.join(saved_data_path, file_name_points), points_a)
         np.save(os.path.join(saved_data_path, file_name_colors), colors_a)
-
+                
     else:
         points_a = np.load(os.path.join(saved_data_path, file_name_points))
         colors_a = np.load(os.path.join(saved_data_path, file_name_colors))
-
+        original_coords = np.load(os.path.join(saved_data_path, file_name_avg_coords))
+        
     print("point cloud loaded in: ", time.time() - start_time)
     
-    # Load all points but display only half of them
     if sparsity_value == 1:
         
         # Convert the display percentage to a number of points
@@ -289,12 +318,11 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
     # Store point data and colors globally
     point_coords = points_ar
     point_colors = colors_ar
-    original_coords = points_a
     point_cloud_point_size = point_size
     
     # Function to save KD-tree with pickle and gzip
     def save_kdtree_pickle_gzip(file_path, kdtree):
-        with gzip.open(file_path, 'wb', compresslevel=1) as f:  #  compresslevel 
+        with gzip.open(file_path, 'wb', compresslevel=1) as f:  #  compresslevel from 1-9, low-high compression
             pickle.dump(kdtree, f)
     # Function to load KD-tree with pickle and gzip
     def load_kdtree_pickle_gzip(file_path):
@@ -308,10 +336,10 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
             # Create the kdtree if it doesn't exist
             points_kdtree = cKDTree(np.array(point_coords))
             save_kdtree_pickle_gzip(kdtree_pickle_path, points_kdtree)
-            print("KD-tree saved with pickle and gzip at:", kdtree_pickle_path)  
+            print("Compressed KD-tree saved at:", kdtree_pickle_path)  
         else:
             points_kdtree = load_kdtree_pickle_gzip(kdtree_pickle_path)
-            print("KD-tree loaded from pickle and gzip file")
+            print("Compressed KD-tree loaded from gzip file")
     else:  
         # KDTree handling
         kdtree_path = os.path.join(saved_data_path, file_name_kdtree)
@@ -324,7 +352,6 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
             save_kdtree_to_file(kdtree_path, points_kdtree)
             print("kdtree saved in: ", time.time() - start_time, "at", kdtree_path)
          
-        
     try: 
         draw_handler = bpy.app.driver_namespace.get('my_draw_handler')
         
@@ -353,7 +380,7 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
             #Store the draw handler reference in the driver namespace
             bpy.app.driver_namespace['my_draw_handler'] = draw_handler
             
-            print("openGL point cloud drawn in:",time.time() - start_time) 
+            print("openGL point cloud drawn in:",time.time() - start_time,"using ",points_percentage," percent of points, ",len(displayed_points)," points") 
             
         else:
             print("Draw handler already exists, skipping drawing")
@@ -972,10 +999,10 @@ class SelectionDetectionOpterator(bpy.types.Operator):
         mesh.from_pydata(verts, edges, [])
         mesh.update()
         
+        
         # After the object is created, store it 
         store_object_state(obj)
         
-
         TriangleMarkOperator ._is_running = False  # Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  # Debug message
         return {'CANCELLED'}
@@ -1127,15 +1154,18 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
         # Generate points along the line between start and end
         return [start + t * (end - start) for t in np.linspace(0, 1, num_points)]
 
-
-    
     def invoke(self, context, event):
         if AutoTriangleMarkOperator ._is_running:
             self.report({'WARNING'}, "Operator is already running")
-            return {'CANCELLED'}  # Do not run the operator if it's already running
+            self.cancel(context)
+            return {'CANCELLED'}
 
         if context.area.type == 'VIEW_3D':
+            #clean up
+            AutoTriangleMarkOperator._triangles = []
+            AutoTriangleMarkOperator._processed_indices = set()
             AutoTriangleMarkOperator ._is_running = True  # Set the flag to indicate the operator is running
+            AutoTriangleMarkOperator._found_triangles = 0
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         else:
@@ -1264,13 +1294,19 @@ class TriangleMarkOperator(bpy.types.Operator):
     def cancel(self, context):
         TriangleMarkOperator._is_running = False
         print("Operation was cancelled")
+        return {'CANCELLED'}
 
     def invoke(self, context, event):
         if TriangleMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
+            self.cancel(context)
             return {'CANCELLED'}
 
         if context.area.type == 'VIEW_3D':
+            # Reset the state
+            TriangleMarkOperator._triangles = []
+            TriangleMarkOperator._processed_indices = set()
+            TriangleMarkOperator._last_outer_corner = None
             TriangleMarkOperator._is_running = True
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
@@ -1357,7 +1393,7 @@ class RectangleMarkOperator(bpy.types.Operator):
     def invoke(self, context, event):
         if SimpleMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
-            return {'CANCELLED'}  # Do not run the operator if it's already running
+            self.cancel(context)
 
         if context.area.type == 'VIEW_3D':
             SimpleMarkOperator._is_running = True  # Set the flag to indicate the operator is running
@@ -1519,7 +1555,7 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
     def invoke(self, context, event):
         if AutoRectangleMarkOperator ._is_running:
             self.report({'WARNING'}, "Operator is already running")
-            return {'CANCELLED'}  # Do not run the operator if it's already running
+            self.cancel(context)
 
         if context.area.type == 'VIEW_3D':
             AutoRectangleMarkOperator ._is_running = True  # Set the flag to indicate the operator is running
@@ -1531,7 +1567,7 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
     def cancel(self, context):
         AutoRectangleMarkOperator ._is_running = False  # Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  # Debug message
-       
+        return {'CANCELLED'}
         
 class CurvedLineMarkOperator(bpy.types.Operator):
     bl_idname = "custom.mark_curved_line"
@@ -1556,6 +1592,7 @@ class CurvedLineMarkOperator(bpy.types.Operator):
 
         if CurvedLineMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
+            self.cancel(context)
             return {'CANCELLED'}
         else:
             self.prev_end_point = None
@@ -1849,7 +1886,8 @@ class AutoCurvedLineOperator(bpy.types.Operator):
     def invoke(self, context, event):
         if SimpleMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
-            return {'CANCELLED'}  # Do not run the operator if it's already running
+            self.cancel(context)
+            return {'CANCELLED'}
 
         if context.area.type == 'VIEW_3D':
             SimpleMarkOperator._is_running = True  # Set the flag to indicate the operator is running
@@ -2189,6 +2227,7 @@ def create_shape(coords_list, shape_type,vertices=None):
             "Unkown Shape", coords_list,
             marking_color, transparency)
         
+
     store_object_state(obj)
     print(f"Rendered {shape_type} shape in: {time.time() - start_time:.2f} seconds")
   
@@ -2218,7 +2257,6 @@ def create_mesh_with_material(obj_name, shape_coords, marking_color, transparenc
     principled_node.inputs['Alpha'].default_value = transparency
 
     obj.data.materials.append(mat)
-
     return obj
 
 #Function to create a colored, resizable line object on top of the line      
@@ -2366,7 +2404,7 @@ def create_dots_shape(coords_list):
         
     obj.color = marking_color  # Set viewport display color 
     shape_counter+=1
-    
+
     #After the object is created, store it 
     store_object_state(obj)
     
@@ -2444,6 +2482,7 @@ def mark_point(point, name="point", size=0.05):
             marker.data.materials[0] = mat
         else:
             marker.data.materials.append(mat)
+
         store_object_state(marker)
 
 def is_click_on_white(self, context, location):
@@ -2490,7 +2529,9 @@ def create_triangle_outline(vertices):
     
     '''wireframe_modifier = obj.modifiers.new(name="Wireframe", type='WIREFRAME')
     wireframe_modifier.thickness = 0.1 # Adjust this value for desired thickness'''
+    
     store_object_state(obj)
+    
     return obj
 
 def create_middle_points(coords_list, num_segments=10):
@@ -2648,6 +2689,17 @@ def save_kdtree_to_file(file_path, kdtree):
     print("saved kdtree to",file_path)
 
 def store_object_state(obj):
+    
+    #bpy.context.view_layer.objects.active = obj  # Make the object the active object
+    #bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS') # Set the origin to the center of the object's bounding box
+ 
+    #bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.context.view_layer.objects.active = obj  # Set as active object
+    bpy.ops.object.select_all(action='DESELECT')  # Deselect all objects
+    obj.select_set(True)  # Select the current object
+
+    set_origin_to_geometry_center(obj)
+
     save_shape_as_image(obj)
     # Storing object state
     obj_state = {
@@ -2660,8 +2712,27 @@ def store_object_state(obj):
     
     undo_stack.append(obj_state) 
     # Clear the redo stack
-    redo_stack.clear()       
-    
+    redo_stack.clear()     
+
+# Set origin to geometry center based on object type   
+def set_origin_to_geometry_center(obj):
+    if obj.type == 'MESH':
+        # For mesh objects, use the built-in function
+        bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
+    else:
+        # For non-mesh objects, calculate the bounding box center manually
+        local_bbox_center = sum((0.125 * Vector(v) for v in obj.bound_box), Vector((0, 0, 0)))
+        global_bbox_center = obj.matrix_world @ local_bbox_center
+
+        # Move the object so that the bounding box center is at the world origin
+        obj.location = obj.location - global_bbox_center
+
+        # Adjust object's mesh data to new origin
+        if hasattr(obj.data, "transform"):
+            obj.data.transform(Matrix.Translation(global_bbox_center))
+            if hasattr(obj.data, "update"):
+                obj.data.update()
+
 # Clears the viewport and deletes the draw handler
 def redraw_viewport():
     
@@ -2713,7 +2784,21 @@ class CenterPointCloudOperator(bpy.types.Operator):
         view3d.region_3d.view_distance = 10  # Distance from the view point
 
         return {'FINISHED'}
-            
+
+class ExportToShapeFileOperator(bpy.types.Operator):
+    bl_idname = "custom.export_to_shapefile"
+    bl_label = "Export to Shapefile"
+    bl_description = "Export the current point cloud to a shapefile"
+
+    def execute(self, context):
+        global point_coords
+        # Call the function to export the point cloud data to a shapefile
+        export_as_shapefile(point_coords,10)
+
+        # Return {'FINISHED'} to indicate that the operation was successful
+        return {'FINISHED'}
+    
+                
 class OBJECT_OT_simple_undo(bpy.types.Operator):
     bl_idname = "object.simple_undo"
     bl_label = "Simple Undo"
@@ -2764,6 +2849,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         scene = context.scene
         
         layout.operator("wm.las_open", text="Import Point Cloud")
+        layout.operator("custom.export_to_shapefile", text="export to shapefile")  
         layout.prop(scene, "points_percentage")
         layout.operator("custom.center_pointcloud", text="Center Point Cloud")
         layout.operator("custom.create_point_cloud_object", text="Create Point Cloud object")
@@ -2809,7 +2895,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row.prop(scene, "save_shape") 
         row = layout.row()
         row.prop(scene, "show_dots")
-               
+        
          # Dummy space
         for _ in range(5): 
             layout.label(text="")
@@ -2843,7 +2929,7 @@ def register():
     bpy.utils.register_class(CurvedLineMarkOperator)
     bpy.utils.register_class(CorrectionPopUpOperator)
     bpy.utils.register_class(CenterPointCloudOperator)
-
+    bpy.utils.register_class(ExportToShapeFileOperator)
 
     bpy.types.Scene.intensity_threshold = bpy.props.FloatProperty(
         name="Intensity Threshold",
@@ -2954,6 +3040,7 @@ def unregister():
     bpy.utils.unregister_class(CreatePointCloudObjectOperator)
     bpy.utils.unregister_class(CorrectionPopUpOperator)
     bpy.utils.unregister_class(CenterPointCloudOperator)
+    bpy.utils.unregister_class(ExportToShapeFileOperator)
     
     del bpy.types.Scene.marking_transparency
     del bpy.types.Scene.marking_color
@@ -3135,7 +3222,7 @@ def save_shape_as_image(obj):
         # Set world background to black
         bpy.context.scene.world.use_nodes = True
         bpy.context.scene.world.node_tree.nodes["Background"].inputs[0].default_value = (0, 0, 0, 1)  # Black color
-
+        
         # Render and save the image with object's name
         file_path = os.path.join(images_dir, f'{obj_name}.png')
         bpy.context.scene.render.filepath = file_path
@@ -3922,7 +4009,8 @@ def visualize_search_radius(location, search_radius, name="SearchRadius"):
 
     # Finally, update the scene
     bpy.context.view_layer.update()
-
+    bpy.context.view_layer.objects.active = obj  # Make the object the active object
+    bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS') # Set the origin to the center of the object's bounding box
     return obj
 
 def create_fixed_length_segments(points, segment_length=1.0):
@@ -4213,4 +4301,63 @@ def create_segmented_middle_points(coords_list, segment_length=1):
         middle_points.append((top_right + bottom_right) / 2)
 
     return middle_points
+
+def export_as_shapefile(points,points_percentage=100,epsg_value=28992):
+    
+    global point_cloud_name
+    start_time=time.time()
+    num_points=len(points)
+    num_points_to_keep = math.ceil(num_points * (points_percentage/100))
+    step = math.ceil(num_points / num_points_to_keep)
+    points = points[::step]
+    
+    print("exporting as shapefile using ",points_percentage," percent of points: ",len(points)," points")
+    point_geometries = [Point(x, y, z) for x, y, z in points]
+    crs = 'EPSG:' + str(epsg_value)
+    gdf = gpd.GeoDataFrame(geometry=point_geometries, crs=crs)
+    print("Exported as a shapefile in: ",time.time()-start_time)
+    
+    # Get the directory of the current Blender file
+    blend_file_path = bpy.data.filepath
+    directory = os.path.dirname(blend_file_path)
+
+    # Create a folder 'road_mark_images' if it doesn't exist
+    shapefile_dir = os.path.join(directory, 'shapefiles')
+    if not os.path.exists(shapefile_dir):
+        os.makedirs(shapefile_dir)
+    # Define the path for the output shapefile
+    output_shapefile_path = os.path.join(shapefile_dir, f"{point_cloud_name}_shapefile")
+    gdf.to_file(output_shapefile_path)
+    print("saved shapefile to: ",shapefile_dir," in: ",time.time()-start_time)
+         
+def dv_points_reader(filepath):
+    data = pd.read_csv(filepath)
+    x_coord = np.asarray(data['x'])
+    y_coord = np.asarray(data['y'])
+    z_coord = np.asarray(data['z'])
+    indices = np.asarray(data['index'])
+
+    points_coord = np.vstack((x_coord, y_coord, z_coord)).T
+
+    points_coord_avg = np.mean(points_coord, axis=0)
+    points_coord = points_coord - points_coord_avg
+
+    return points_coord, indices, points_coord_avg
+
+
+def dv_shapefile_reader(filepath, index, avg_shift, coord_z):
+
+    gdf = gpd.read_file(filepath)
+    gdf["Index_"] = gdf["Index_"].astype(int)
+
+    selected_geometries = gdf[gdf['Index_'] == index]['geometry']
+
+    line_coordinates = list(selected_geometries[index].coords)
+
+    first_point = line_coordinates[0]
+    second_point = line_coordinates[1]
+    line_start = np.array([first_point[0] - avg_shift[0], first_point[1] - avg_shift[1], coord_z])
+    line_end = np.array([second_point[0] - avg_shift[0], second_point[1] - avg_shift[1], coord_z])
+
+    return line_start, line_end
 
