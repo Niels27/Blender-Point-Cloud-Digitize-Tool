@@ -101,17 +101,15 @@ collection_name = "Collection" #the default collection name in blender
 point_cloud_name= None # Used when storing files related to current point cloud
 point_cloud_point_size =  1 # The size of the points in the point cloud
 shape_counter=1 #Keeps track of amount of shapes currently in viewport
-objects_z_height=0.3 #Height of all markings
-cut_off_z=True #cut off points above a certain height
-z_cut_off_amt=0.5 #meters of point cloud height to display
 auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz
 use_pickled_kdtree=True #compress files to save disk space
+save_json=True #generate a json file of point cloud data
 
 #Keeps track of all objects created/removed for undo/redo functions
 undo_stack = []
 redo_stack = []
 
-#Global variable to keep track of the last processed index, for numbering road marks by different functions
+#Global variable to keep track of the last processed index, for numbering road marks
 last_processed_index = 0
 
 # Global variable to keep track of the active operator
@@ -233,8 +231,9 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
     
     start_time = time.time()
     print("Started loading point cloud.."),
-    global point_coords, point_colors, original_coords, points_kdtree, cut_off_z, z_cut_off_amt,use_pickled_kdtree,point_cloud_name,point_cloud_point_size
+    global point_coords, point_colors, original_coords, points_kdtree,use_pickled_kdtree,point_cloud_name,point_cloud_point_size
     points_percentage=context.scene.points_percentage
+    z_height_cut_off=context.scene.z_height_cut_off
     
     base_file_name = os.path.basename(path)
     point_cloud_name = base_file_name
@@ -269,10 +268,10 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
 
         print("Estimated road base level:", road_base_level)
         
-        if(cut_off_z):
+        if(z_height_cut_off>0):
             # Filter points with Z coordinate > 0.5
             print("Number of points before filtering:", len(points_a))
-            mask = points_a[:, 2] <= (road_base_level+z_cut_off_amt)
+            mask = points_a[:, 2] <= (road_base_level+z_height_cut_off)
             points_a = points_a[mask]
             colors_a = colors_a[mask]
             print("Number of points after filtering:", len(points_a))
@@ -299,27 +298,49 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
         colors_a = np.load(os.path.join(saved_data_path, file_name_colors))
         original_coords = np.load(os.path.join(saved_data_path, file_name_avg_coords))
         
-    print("point cloud loaded in: ", time.time() - start_time)
-    
-    if sparsity_value == 1:
-        
-        # Convert the display percentage to a number of points
-        number_of_points_to_display = int(len(points_a) * (points_percentage / 100))
-
-        displayed_indices = np.random.choice(len(points_a), number_of_points_to_display, replace=False)
-        displayed_points= points_a[displayed_indices]
-        displayed_colors = colors_a[displayed_indices]
-        points_ar = points_a
-        colors_ar = colors_a
-    else:
-        points_ar = points_a[:: sparsity_value]
-        colors_ar = colors_a[:: sparsity_value]
-        
     # Store point data and colors globally
-    point_coords = points_ar
-    point_colors = colors_ar
+    point_coords = points_a
+    point_colors = colors_a
     point_cloud_point_size = point_size
     
+    print("point cloud loaded in: ", time.time() - start_time)
+    
+    if sparsity_value == 1 and points_percentage<100: 
+        # Calculate sparsity value based on the desired percentage
+        desired_sparsity = int(1 / (points_percentage / 100))
+
+        # Evenly sample points based on the calculated sparsity
+        reduced_indices = range(0, len(points_a), desired_sparsity)
+        reduced_points = points_a[reduced_indices]
+        reduced_colors = colors_a[reduced_indices]
+    else:
+        # Evenly sample points using the provided sparsity value
+        reduced_points = points_a[::sparsity_value]
+        reduced_colors = colors_a[::sparsity_value]
+        
+    #this function creates more read able json files, but is slower 
+    #if(save_json):
+        #save_as_json(point_coords,point_colors)
+        
+    #save point cloud info as json file
+    if save_json:
+        start_time = time.time()
+        print("exporting point cloud data as JSON")
+        # Convert NumPy float32 values to Python float for JSON serialization
+        point_cloud_data = [{'coords': [float(coord) for coord in point], 'color': [int(clr) for clr in color]} for point, color in zip(point_coords, point_colors)]
+
+        # Save as JSON
+        json_data = json.dumps(point_cloud_data)
+
+        # Define file paths
+        json_file_path = os.path.join(saved_data_path, point_cloud_name + "_points_colors.json")
+
+        # Write to JSON file
+        with open(json_file_path, 'w') as json_file:
+            json_file.write(json_data)
+
+        print("Combined JSON file saved at: ", json_file_path, "in: ", time.time() - start_time, "seconds")
+            
     # Function to save KD-tree with pickle and gzip
     def save_kdtree_pickle_gzip(file_path, kdtree):
         with gzip.open(file_path, 'wb', compresslevel=1) as f:  #  compresslevel from 1-9, low-high compression
@@ -357,10 +378,10 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
         
         if draw_handler is None:
             # colors_ar should be in uint8 format
-            displayed_colors = displayed_colors / 255.0  # Normalize to 0-1 range
+            reduced_colors = reduced_colors / 255.0  # Normalize to 0-1 range
             #Converting to tuple 
-            coords = tuple(map(tuple, displayed_points))
-            colors = tuple(map(tuple, displayed_colors))
+            coords = tuple(map(tuple, reduced_points))
+            colors = tuple(map(tuple, reduced_colors))
             
             shader = gpu.shader.from_builtin('3D_FLAT_COLOR')
             batch = batch_for_shader(
@@ -380,7 +401,7 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
             #Store the draw handler reference in the driver namespace
             bpy.app.driver_namespace['my_draw_handler'] = draw_handler
             
-            print("openGL point cloud drawn in:",time.time() - start_time,"using ",points_percentage," percent of points, ",len(displayed_points)," points") 
+            print("openGL point cloud drawn in:",time.time() - start_time,"using ",points_percentage," percent of points, ",len(reduced_points)," points") 
             
         else:
             print("Draw handler already exists, skipping drawing")
@@ -498,6 +519,7 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
         
         marking_color = context.scene.marking_color
         width = context.scene.fatline_width
+        extra_z_height = context.scene.extra_z_height
         
         view3d = context.space_data
         region = context.region
@@ -507,17 +529,16 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
             coord_3d_start = self.prev_end_point
         else:
             coord_3d_start = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-            coord_3d_start.z += objects_z_height  # Add to the z dimension to prevent clipping
+            coord_3d_start.z += extra_z_height  # Add to the z dimension to prevent clipping
 
         coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-        coord_3d_end.z += objects_z_height  
+        coord_3d_end.z += extra_z_height  
 
         # Create a new mesh object for the line
         mesh = bpy.data.meshes.new(name="Line Mesh")
         obj = bpy.data.objects.new("Thin Line", mesh)
         
-        # After the object is created, store it 
-        store_object_state(obj)
+      
         
         # Link it to scene
         bpy.context.collection.objects.link(obj)
@@ -542,7 +563,8 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
         obj.data.materials.append(material)
 
         self.prev_end_point = coord_3d_end
-
+          # After the object is created, store it 
+        store_object_state(obj)
         # Create a rectangle object on top of the line
         create_rectangle_line_object(coord_3d_start, coord_3d_end)
         
@@ -1186,9 +1208,9 @@ class TriangleMarkOperator(bpy.types.Operator):
     _last_outer_corner = None  # Initialize the last outer corner here   
          
     def modal(self, context, event):
-        global point_coords, point_colors, points_kdtree,objects_z_height
+        global point_coords, point_colors, points_kdtree
         intensity_threshold = context.scene.intensity_threshold
-        
+        extra_z_height = context.scene.extra_z_height
         if event.type == 'MOUSEMOVE':  
             self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
             
@@ -1627,6 +1649,7 @@ def draw_line(self, context, event):
     marking_color = context.scene.marking_color
     width = context.scene.fatline_width
     intensity_threshold = context.scene.intensity_threshold
+    extra_z_height = context.scene.extra_z_height
     #user_input=context.scene.user_input_result
     
     view3d = context.space_data
@@ -1637,7 +1660,7 @@ def draw_line(self, context, event):
     
     #Convert the mouse position to a 3D location for the end point of the line
     coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-    coord_3d_end.z += objects_z_height  # Add to the z dimension to prevent clipping
+    coord_3d_end.z += extra_z_height  # Add to the z dimension to prevent clipping
 
     #Check if the current click is on a white road mark
     on_white_end = is_click_on_white(self, context, coord_3d_end)
@@ -2052,7 +2075,8 @@ def create_flexible_rectangle(coords):
     return [north, east, south, west]
 
 def draw_fixed_triangle(context, location, size=1.0):
-    global objects_z_height
+    
+    extra_z_height = context.scene.extra_z_height
     # Create new mesh and object
     mesh = bpy.data.meshes.new('FixedTriangle')
     obj = bpy.data.objects.new('Fixed Triangle', mesh)
@@ -2061,7 +2085,7 @@ def draw_fixed_triangle(context, location, size=1.0):
     bpy.context.collection.objects.link(obj)
     
     # Set object location
-    obj.location = (location.x, location.y, objects_z_height)
+    obj.location = (location.x, location.y, extra_z_height)
 
     # Create mesh data
     bm = bmesh.new()
@@ -2233,8 +2257,8 @@ def create_shape(coords_list, shape_type,vertices=None):
   
 def create_mesh_with_material(obj_name, shape_coords, marking_color, transparency):
     
-    global objects_z_height
-    shape_coords = [(x, y, z + objects_z_height) for x, y, z in shape_coords]
+    extra_z_height = context.scene.extra_z_height
+    shape_coords = [(x, y, z + extra_z_height) for x, y, z in shape_coords]
         
     mesh = bpy.data.meshes.new(obj_name + "_mesh")
     obj = bpy.data.objects.new(obj_name, mesh)
@@ -2265,7 +2289,7 @@ def create_rectangle_line_object(start, end):
     context = bpy.context
     marking_color = context.scene.marking_color
     transparency = context.scene.marking_transparency
-    global objects_z_height
+    extra_z_height = context.scene.extra_z_height
     width = context.scene.fatline_width
     # Calculate the direction vector and its length
     direction = end - start
@@ -2278,11 +2302,11 @@ def create_rectangle_line_object(start, end):
     orthogonal.normalize()
     orthogonal *= width / 2
 
-    # Calculate the rectangle's vertices with an increase in the z-axis by objects_z_height
-    v1 = start + orthogonal + Vector((0, 0, objects_z_height))
-    v2 = start - orthogonal + Vector((0, 0, objects_z_height))
-    v3 = end - orthogonal + Vector((0, 0, objects_z_height))
-    v4 = end + orthogonal + Vector((0, 0, objects_z_height))
+    # Calculate the rectangle's vertices with an increase in the z-axis by extra_z_height
+    v1 = start + orthogonal + Vector((0, 0, extra_z_height))
+    v2 = start - orthogonal + Vector((0, 0, extra_z_height))
+    v3 = end - orthogonal + Vector((0, 0, extra_z_height))
+    v4 = end + orthogonal + Vector((0, 0, extra_z_height))
 
     # Create a new mesh object for the rectangle
     mesh = bpy.data.meshes.new(name="Rectangle Mesh")
@@ -2333,10 +2357,11 @@ def create_rectangle_line_object(start, end):
 def create_dots_shape(coords_list):
     
     start_time=time.time()
-    global shape_counter, objects_z_height
+    global shape_counter
     
     marking_color=context.scene.marking_color
     transparency = bpy.context.scene.marking_transparency
+    extra_z_height = context.scene.extra_z_height
     
     # Create a new mesh and link it to the scene
     mesh = bpy.data.meshes.new("Combined Shape")
@@ -2346,7 +2371,7 @@ def create_dots_shape(coords_list):
     bm = bmesh.new()
 
     square_size = 0.025  # Size of each square
-    z_offset = objects_z_height  # Offset in Z coordinate
+    z_offset = extra_z_height  # Offset in Z coordinate
     max_gap = 10  # Maximum gap size to fill
 
     #filters out bad points
@@ -2851,6 +2876,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         layout.operator("wm.las_open", text="Import Point Cloud")
         layout.operator("custom.export_to_shapefile", text="export to shapefile")  
         layout.prop(scene, "points_percentage")
+        layout.prop(scene, "z_height_cut_off")
         layout.operator("custom.center_pointcloud", text="Center Point Cloud")
         layout.operator("custom.create_point_cloud_object", text="Create Point Cloud object")
         layout.operator("custom.remove_point_cloud", text="Remove point cloud")
@@ -2863,6 +2889,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row = layout.row()
         layout.prop(scene, "marking_color")
         layout.prop(scene, "marking_transparency")
+        layout.prop(scene, "extra_z_height")
         #layout.operator("custom.draw_straight_line", text="Draw Simple Line")
         
         row = layout.row(align=True)
@@ -2895,6 +2922,8 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row.prop(scene, "save_shape") 
         row = layout.row()
         row.prop(scene, "show_dots")
+        row = layout.row()
+        
         
          # Dummy space
         for _ in range(5): 
@@ -3009,6 +3038,18 @@ def register():
         default=False,
         subtype='UNSIGNED'  
     )
+    bpy.types.Scene.z_height_cut_off = bpy.props.FloatProperty(
+        name="max z",
+        description="height to cut off z",
+        default=0,
+        subtype='UNSIGNED'  
+    )
+    bpy.types.Scene.extra_z_height = bpy.props.FloatProperty(
+        name="marking z",
+        description="extra height of all objects",
+        default=0,
+        subtype='UNSIGNED'  
+    )
     bpy.utils.register_class(FindALlRoadMarkingsOperator)
     bpy.utils.register_class(OBJECT_OT_simple_undo)
     bpy.utils.register_class(OBJECT_OT_simple_redo)
@@ -3051,6 +3092,8 @@ def unregister():
     del bpy.types.Scene.save_shape
     del bpy.types.Scene.auto_load
     del bpy.types.Scene.show_dots
+    del bpy.types.Scene.z_height_cut_off
+    del bpy.types.Scene.extra_z_height
     del bpy.types.Scene.points_percentage
     
     bpy.utils.unregister_class(OBJECT_OT_simple_undo)
@@ -4361,3 +4404,25 @@ def dv_shapefile_reader(filepath, index, avg_shift, coord_z):
 
     return line_start, line_end
 
+def save_as_json(points, colors):
+    # Convert data to a list of dictionaries
+    point_cloud_data = []
+    for point, color in zip(points, colors):
+        point_data = {
+            'x': point[0],
+            'y': point[1],
+            'z': point[2],
+            'color': {
+                'r': color[0],
+                'g': color[1],
+                'b': color[2]
+            }
+        }
+        point_cloud_data.append(point_data)
+
+    # Convert to JSON
+    json_data = json.dumps(point_cloud_data)
+
+    # Save to a JSON file
+    with open('point_cloud_data.json', 'w') as file:
+        file.write(json_data)
