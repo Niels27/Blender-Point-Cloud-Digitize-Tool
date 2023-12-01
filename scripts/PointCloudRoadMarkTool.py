@@ -103,7 +103,7 @@ point_cloud_point_size =  1 # The size of the points in the point cloud
 shape_counter=1 #Keeps track of amount of shapes currently in viewport
 auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" # Add path here for a laz file name auto.laz
 use_pickled_kdtree=True #compress files to save disk space
-save_json=True #generate a json file of point cloud data
+save_json=False #generate a json file of point cloud data
 
 #Keeps track of all objects created/removed for undo/redo functions
 undo_stack = []
@@ -238,17 +238,22 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
     base_file_name = os.path.basename(path)
     point_cloud_name = base_file_name
     directory_path = os.path.dirname(path)
-    saved_data_path = os.path.join(directory_path, "Stored Data")
+    blend_file_path = bpy.data.filepath
+    directory = os.path.dirname(blend_file_path)
+    JSON_data_path = os.path.join(directory, "JSON files")
+    shapefiles_data_path = os.path.join(directory, "shapefiles")
+    stored_data_path = os.path.join(directory, "stored data")
     file_name_points = base_file_name + "_points.npy"
     file_name_colors = base_file_name + "_colors.npy"
     file_name_avg_coords = base_file_name + "_avgCoords.npy"
     file_name_kdtree = base_file_name + "_kdtree.joblib"
     file_name_kdtree_pickle = base_file_name + "_kdtree.gz"
+    blend_file_path = bpy.data.filepath
+  
+    if not os.path.exists(stored_data_path):
+        os.mkdir(stored_data_path)
     
-    if not os.path.exists(saved_data_path):
-        os.mkdir(saved_data_path)
-    
-    if not os.path.exists(os.path.join(saved_data_path, file_name_points)):
+    if not os.path.exists(os.path.join(stored_data_path, file_name_points)):
         point_cloud = lp.read(path)
         points_a = np.vstack((point_cloud.x, point_cloud.y, point_cloud.z)).transpose()
         colors_a = np.vstack((point_cloud.red, point_cloud.green, point_cloud.blue)).transpose() / 65535
@@ -287,16 +292,16 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
         #print(points_a[:5])
         
         #Storing Shifting coords 
-        np.save(os.path.join(saved_data_path, file_name_avg_coords), points_a_avg)
+        np.save(os.path.join(stored_data_path, file_name_avg_coords), points_a_avg)
     
         #Storing the centered coordinate arrays as npy file
-        np.save(os.path.join(saved_data_path, file_name_points), points_a)
-        np.save(os.path.join(saved_data_path, file_name_colors), colors_a)
+        np.save(os.path.join(stored_data_path, file_name_points), points_a)
+        np.save(os.path.join(stored_data_path, file_name_colors), colors_a)
                 
     else:
-        points_a = np.load(os.path.join(saved_data_path, file_name_points))
-        colors_a = np.load(os.path.join(saved_data_path, file_name_colors))
-        original_coords = np.load(os.path.join(saved_data_path, file_name_avg_coords))
+        points_a = np.load(os.path.join(stored_data_path, file_name_points))
+        colors_a = np.load(os.path.join(stored_data_path, file_name_colors))
+        original_coords = np.load(os.path.join(stored_data_path, file_name_avg_coords))
         
     # Store point data and colors globally
     point_coords = points_a
@@ -318,29 +323,12 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
         reduced_points = points_a[::sparsity_value]
         reduced_colors = colors_a[::sparsity_value]
         
-    #this function creates more read able json files, but is slower 
-    #if(save_json):
-        #save_as_json(point_coords,point_colors)
-        
-    #save point cloud info as json file
+    #Save json file of point cloud data
     if save_json:
-        start_time = time.time()
-        print("exporting point cloud data as JSON")
-        # Convert NumPy float32 values to Python float for JSON serialization
-        point_cloud_data = [{'coords': [float(coord) for coord in point], 'color': [int(clr) for clr in color]} for point, color in zip(point_coords, point_colors)]
+        save_as_json(reduced_points,reduced_colors,JSON_data_path,point_cloud_name,points_percentage)
+        #this function creates more read able json files, but is slower 
+        #save_as_json(point_coords,point_colors)
 
-        # Save as JSON
-        json_data = json.dumps(point_cloud_data)
-
-        # Define file paths
-        json_file_path = os.path.join(saved_data_path, point_cloud_name + "_points_colors.json")
-
-        # Write to JSON file
-        with open(json_file_path, 'w') as json_file:
-            json_file.write(json_data)
-
-        print("Combined JSON file saved at: ", json_file_path, "in: ", time.time() - start_time, "seconds")
-            
     # Function to save KD-tree with pickle and gzip
     def save_kdtree_pickle_gzip(file_path, kdtree):
         with gzip.open(file_path, 'wb', compresslevel=1) as f:  #  compresslevel from 1-9, low-high compression
@@ -352,7 +340,7 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
 
     if(use_pickled_kdtree):
         # KDTree handling
-        kdtree_pickle_path = os.path.join(saved_data_path, file_name_kdtree_pickle)
+        kdtree_pickle_path = os.path.join(stored_data_path, file_name_kdtree_pickle)
         if points_kdtree is None:
             # Create the kdtree if it doesn't exist
             points_kdtree = cKDTree(np.array(point_coords))
@@ -363,7 +351,7 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
             print("Compressed KD-tree loaded from gzip file")
     else:  
         # KDTree handling
-        kdtree_path = os.path.join(saved_data_path, file_name_kdtree)
+        kdtree_path = os.path.join(stored_data_path, file_name_kdtree)
         points_kdtree = load_kdtree_from_file(kdtree_path)
         if points_kdtree is None:
             # Create the kdtree if it doesn't exist
@@ -2823,7 +2811,50 @@ class ExportToShapeFileOperator(bpy.types.Operator):
         # Return {'FINISHED'} to indicate that the operation was successful
         return {'FINISHED'}
     
-                
+def save_as_json(point_coords,point_colors,JSON_data_path,point_cloud_name,points_percentage):
+    start_time = time.time()
+    print("exporting point cloud data as JSON with",points_percentage, "percent of points")
+    # Convert NumPy float32 values to Python float for JSON serialization
+    point_cloud_data = [{'coords': [round(float(coord), 2) for coord in point], 'color': [int(clr) for clr in color]} for point, color in zip(point_coords, point_colors)]
+
+    # Save as compact JSON (without pretty-printing)
+    json_data = json.dumps(point_cloud_data, separators=(',', ':')).encode('utf-8')
+
+    # Define file paths
+    json_file_path = os.path.join(JSON_data_path, point_cloud_name + "_points_colors.json.gz")
+
+    # Write to JSON file
+    print("compressing JSON..")
+    with gzip.open(json_file_path, 'wb') as f:
+        f.write(json_data)
+
+    print("Combined JSON file compressed and saved at: ", JSON_data_path, "in: ", time.time() - start_time, "seconds")
+    
+    '''start_time = time.time()
+    print("exporting point cloud data as JSON with",points_percentage, "percent of points")
+    # Convert NumPy float32 values to Python float for JSON serialization
+    point_cloud_data = [{'coords': [round(float(coord), 2) for coord in point], 'color': [int(clr) for clr in color]} for point, color in zip(point_coords, point_colors)]
+    # Save as compact JSON (without pretty-printing)
+    json_data = json.dumps(point_cloud_data, separators=(',', ':'))
+    # Define file paths
+    json_file_path = os.path.join(JSON_data_path, point_cloud_name + "_points_colors.json")
+    # Write to JSON file
+    with open(json_file_path, 'w') as json_file:
+        json_file.write(json_data)
+    print("Combined JSON file saved at: ", JSON_data_path, "in: ", time.time() - start_time, "seconds")'''
+
+    '''start_time = time.time()
+    # Convert NumPy float32 values to Python float for JSON serialization
+    point_cloud_data = [{'coords': [float(coord) for coord in point], 'color': [int(clr) for clr in color]} for point, color in zip(point_coords, point_colors)]
+    # Save as JSON
+    json_data = json.dumps(point_cloud_data)
+    # Define file paths
+    json_file_path = os.path.join(JSON_data_path, point_cloud_name + "_points_colors.json")
+    # Write to JSON file
+    with open(json_file_path, 'w') as json_file:
+        json_file.write(json_data)
+    print("Combined JSON file saved at: ", json_file_path, "in: ", time.time() - start_time, "seconds")'''
+                    
 class OBJECT_OT_simple_undo(bpy.types.Operator):
     bl_idname = "object.simple_undo"
     bl_label = "Simple Undo"
@@ -4403,8 +4434,8 @@ def dv_shapefile_reader(filepath, index, avg_shift, coord_z):
     line_end = np.array([second_point[0] - avg_shift[0], second_point[1] - avg_shift[1], coord_z])
 
     return line_start, line_end
-
-def save_as_json(points, colors):
+   
+def save_as_json_pretty(points, colors):
     # Convert data to a list of dictionaries
     point_cloud_data = []
     for point, color in zip(points, colors):
@@ -4426,3 +4457,4 @@ def save_as_json(points, colors):
     # Save to a JSON file
     with open('point_cloud_data.json', 'w') as file:
         file.write(json_data)
+        

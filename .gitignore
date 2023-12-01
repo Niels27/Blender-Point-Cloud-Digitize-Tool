@@ -5,3 +5,10 @@
 *.prj
 *.dbf
 *.cpg
+*.pyc
+venv/
+stored data/
+JSON files/
+road_mark_images/
+shapefiles/
+webbased poc/.hintrc
