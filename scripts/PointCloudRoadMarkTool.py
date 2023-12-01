@@ -338,7 +338,7 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
         with gzip.open(file_path, 'rb') as f:
             return pickle.load(f)  
 
-    if(use_pickled_kdtree):
+    if use_pickled_kdtree:
         # KDTree handling
         kdtree_pickle_path = os.path.join(stored_data_path, file_name_kdtree_pickle)
         if points_kdtree is None:
@@ -2814,6 +2814,30 @@ class ExportToShapeFileOperator(bpy.types.Operator):
 def save_as_json(point_coords,point_colors,JSON_data_path,point_cloud_name,points_percentage):
     start_time = time.time()
     print("exporting point cloud data as JSON with",points_percentage, "percent of points")
+    # Adjusting the structure to match the expected format
+    point_cloud_data = [
+        {
+            'x': round(float(point[0]), 2), 
+            'y': round(float(point[1]), 2), 
+            'z': round(float(point[2]), 2), 
+            'color': {'r': int(color[0]), 'g': int(color[1]), 'b': int(color[2])}
+        } for point, color in zip(point_coords, point_colors)
+    ]
+
+    # Save as compact JSON to reduce file size
+    json_data = json.dumps(point_cloud_data, separators=(',', ':')).encode('utf-8')
+
+    # Defines file paths
+    json_file_path = os.path.join(JSON_data_path, f"{point_cloud_name}_points_colors.json.gz")
+
+    # Write to JSON file
+    print("Compressing JSON...")
+    with gzip.open(json_file_path, 'wb') as f:
+        f.write(json_data)
+
+    print("Combined JSON file compressed and saved at: ", JSON_data_path, "in: ", time.time() - start_time, "seconds")
+    
+    '''print("exporting point cloud data as JSON with",points_percentage, "percent of points")
     # Convert NumPy float32 values to Python float for JSON serialization
     point_cloud_data = [{'coords': [round(float(coord), 2) for coord in point], 'color': [int(clr) for clr in color]} for point, color in zip(point_coords, point_colors)]
 
@@ -2828,7 +2852,7 @@ def save_as_json(point_coords,point_colors,JSON_data_path,point_cloud_name,point
     with gzip.open(json_file_path, 'wb') as f:
         f.write(json_data)
 
-    print("Combined JSON file compressed and saved at: ", JSON_data_path, "in: ", time.time() - start_time, "seconds")
+    print("Combined JSON file compressed and saved at: ", JSON_data_path, "in: ", time.time() - start_time, "seconds")'''
     
     '''start_time = time.time()
     print("exporting point cloud data as JSON with",points_percentage, "percent of points")

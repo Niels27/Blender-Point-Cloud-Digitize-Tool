@@ -1,28 +1,67 @@
 // Get the progress element
 const progressElement = document.getElementById('progress');
 
+function fetchJSONWithProgress(url) {
+    return fetch(url).then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+
+        const contentLength = +response.headers.get('Content-Length');
+        let receivedLength = 0;
+        let chunks = []; // Array to hold received text chunks
+
+        const reader = response.body.getReader();
+
+        function readNextChunk() {
+            return reader.read().then(({ done, value }) => {
+                if (done) {
+                    // All chunks have been read
+                    let json = chunks.join('');
+                    console.log("JSON start:", json.substring(0, 500));
+                    console.log("JSON end:", json.substring(json.length - 500));
+                    return JSON.parse(json);
+                }
+
+                // Convert chunk to text and accumulate
+                let chunkText = new TextDecoder("utf-8").decode(value);
+                chunks.push(chunkText);
+                receivedLength += value.length;
+                progressElement.textContent = `Received ${receivedLength} of ${contentLength}`;
+
+                // Read the next chunk
+                return readNextChunk();
+            });
+        }
+
+        return readNextChunk();
+    });
+}
+
+function processPointCloud(pointCloudData) {
+    console.log("Data processed. Number of points:", pointCloudData.length);
+    console.log("Sample data:", pointCloudData.slice(0, 10));
+    progressElement.textContent = `Processing ${pointCloudData.length} points...`;
+
+    // Initialize Three.js scene
+    init(pointCloudData);
+}
+
 fetch('/get-point-cloud')
     .then(response => {
         console.log("Received response, Content-Encoding:", response.headers.get("Content-Encoding"));
-        return response.arrayBuffer();
-    })
-    .then(buffer => {
-        try {
-            const decompressed = pako.inflate(buffer, { to: 'string' });
-            return JSON.parse(decompressed);
-        } catch (error) {
-            console.error("Decompression error:", error);
-            // Try parsing as regular JSON in case the data is not compressed
-            return JSON.parse(new TextDecoder("utf-8").decode(buffer));
+        if (response.headers.get("Content-Encoding") === "gzip") {
+            // Handle gzipped data
+            return response.arrayBuffer().then(buffer => {
+                const decompressed = pako.inflate(buffer, { to: 'string' });
+                return JSON.parse(decompressed);
+            });
+        } else {
+            // Handle large JSON with progress
+            return fetchJSONWithProgress(response.url);
         }
     })
-    .then(pointCloudData => {
-        console.log("Data processed. Number of points:", pointCloudData.length);
-        progressElement.textContent = `Processing ${pointCloudData.length} points...`;
-        
-        // Initialize Three.js scene
-        init(pointCloudData);
-    })
+    .then(processPointCloud)
     .catch(error => {
         console.error('Error processing data:', error);
         progressElement.textContent = 'Error processing data.';
@@ -44,8 +83,12 @@ function init(pointCloudData) {
     const colors = [];
     
     pointCloudData.forEach((point, index) => {
-        // Check for NaN values
-        if (!isNaN(point.x) && !isNaN(point.y) && !isNaN(point.z)) {
+        if (point.coords && point.color) {
+            // Handle the format with 'coords' and 'color' arrays
+            vertices.push(...point.coords);
+            colors.push(point.color[0] / 255, point.color[1] / 255, point.color[2] / 255);
+        } else if (!isNaN(point.x) && !isNaN(point.y) && !isNaN(point.z)) {
+            // Handle the format with 'x', 'y', 'z', and 'color' object
             vertices.push(point.x, point.y, point.z);
             colors.push(point.color.r / 255, point.color.g / 255, point.color.b / 255);
         } else {
@@ -73,7 +116,7 @@ function init(pointCloudData) {
 
     console.log("Starting render loop...");
     progressElement.textContent = "Starting render loop...";
-    
+
     // Animation loop
     function animate() {
         requestAnimationFrame(animate);
