@@ -97,7 +97,7 @@ collection_name = "Collection" #the default collection name in blender
 point_cloud_name= None #Used when storing files related to current point cloud
 point_cloud_point_size =  1 #The size of the points in the point cloud
 shape_counter=1 #Keeps track of amount of shapes drawn, used to number them
-auto_las_file_path = "C:/Users/Niels/OneDrive/stage hawarIT cloud/point clouds/auto.laz" #Add path here for a laz file name auto.laz
+auto_las_file_path =os.path.dirname(bpy.data.filepath)+'/auto.laz' #path  for a laz file name auto.laz
 use_pickled_kdtree=True #compress files to save disk space
 save_json=False #generate a json file of point cloud data
 
@@ -133,7 +133,6 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
     file_name_avg_coords = base_file_name + "_avgCoords.npy"
     file_name_kdtree = base_file_name + "_kdtree.joblib"
     file_name_kdtree_pickle = base_file_name + "_kdtree.gz"
-    blend_file_path = bpy.data.filepath
   
     if not os.path.exists(stored_data_path):
         os.mkdir(stored_data_path)
@@ -226,19 +225,21 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
     if use_pickled_kdtree:
         #KDTree handling
         kdtree_pickle_path = os.path.join(stored_data_path, file_name_kdtree_pickle)
-        if points_kdtree is None:
+        if not os.path.exists(kdtree_pickle_path):
             #Create the kdtree if it doesn't exist
+            print("creating cKDTree..")
             points_kdtree = cKDTree(np.array(point_coords))
             save_kdtree_pickle_gzip(kdtree_pickle_path, points_kdtree)
-            print("Compressed KD-tree saved at:", kdtree_pickle_path)  
+            print("Compressed cKD-tree saved at:", kdtree_pickle_path)  
         else:
+            print("kdtree found, loading..")
             points_kdtree = load_kdtree_pickle_gzip(kdtree_pickle_path)
-            print("Compressed KD-tree loaded from gzip file")
+            print("Compressed cKD-tree loaded from gzip file in:", time.time() - start_time)
     else:  
         #KDTree handling
         kdtree_path = os.path.join(stored_data_path, file_name_kdtree)
         points_kdtree = load_kdtree_from_file(kdtree_path)
-        if points_kdtree is None:
+        if not os.path.exists(kdtree_pickle_path):
             #create the kdtree if it doesn't exist
             points_kdtree = cKDTree(np.array(point_coords))
             print("kdtree created in: ", time.time() - start_time)
@@ -274,7 +275,7 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
             #Store the draw handler reference in the driver namespace
             bpy.app.driver_namespace['my_draw_handler'] = draw_handler
             
-            print("openGL point cloud drawn in:",time.time() - start_time,"using ",points_percentage," percent of points, ",len(reduced_points)," points") 
+            print("openGL point cloud drawn in:",time.time() - start_time,"using ",points_percentage," percent of points (",len(reduced_points),") points") 
             
         else:
             print("Draw handler already exists, skipping drawing")
@@ -2636,7 +2637,7 @@ class RemovePointCloudOperator(bpy.types.Operator):
 class LAS_OT_OpenOperator(bpy.types.Operator):
     
     bl_idname = "wm.las_open"
-    bl_label = "Open LAS File"
+    bl_label = "Open LAS/LAZ File"
 
     filepath: bpy.props.StringProperty(subtype="FILE_PATH")
     
@@ -2648,7 +2649,7 @@ class LAS_OT_OpenOperator(bpy.types.Operator):
         sparsity_value = bpy.context.scene.sparsity_value
         point_size = bpy.context.scene.point_size
         pointcloud_load_optimized(self.filepath, point_size, sparsity_value)
-        print("Opened LAS file: ", self.filepath,"in %s seconds" % (time.time() - start_time))
+        print("Opened LAS/LAZ file: ", self.filepath,"in %s seconds" % (time.time() - start_time))
         return {'FINISHED'}
 
     def invoke(self, context, event):
@@ -3274,7 +3275,7 @@ def export_as_shapefile(points,points_percentage=100,epsg_value=28992):
     step = math.ceil(num_points / num_points_to_keep)
     points = points[::step]
     
-    print("exporting as shapefile using ",points_percentage," percent of points: ",len(points)," points")
+    print("exporting as shapefile using ",points_percentage," percent of points: ","(",len(points)," points)")
     point_geometries = [Point(x, y, z) for x, y, z in points]
     crs = 'EPSG:' + str(epsg_value)
     gdf = gpd.GeoDataFrame(geometry=point_geometries, crs=crs)
