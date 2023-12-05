@@ -1687,7 +1687,7 @@ class CorrectionPopUpOperator(bpy.types.Operator):
         context.scene.user_input_result = self.action
        
         if self.action == 'CORRECT':
-            coord_3d_start, coord_3d_end = snap_to_road_mark(self,context, coord_3d_start, coord_3d_end, click_to_correct)
+            coord_3d_start, coord_3d_end = snap_line_to_road_mark(self,context, coord_3d_start, coord_3d_end, click_to_correct)
             create_rectangle_line_object(coord_3d_start, coord_3d_end)
         
         elif self.action == ('CANCEL'):

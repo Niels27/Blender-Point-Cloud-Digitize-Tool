@@ -1,6 +1,6 @@
 # UI/panel
-
 import bpy
+from bpy import context
 
 #Panel for the Road Marking Digitizer
 class DIGITIZE_PT_Panel(bpy.types.Panel):
@@ -59,8 +59,6 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("object.simple_undo", text="Undo")
         row.operator("object.simple_redo", text="Redo")
-        row = layout.row()
-        row.prop(scene, "auto_load")
         row = layout.row()
         row.prop(scene, "save_shape") 
         row = layout.row()
