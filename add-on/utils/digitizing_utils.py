@@ -496,8 +496,6 @@ def create_dots_shape(coords_list):
     store_object_state(obj)
     
 
-
-
 #function to draw tiny marks on a given point
 def mark_point(point, name="point", size=0.05):
     
@@ -521,7 +519,6 @@ def mark_point(point, name="point", size=0.05):
             marker.data.materials.append(mat)
 
         store_object_state(marker)
-
 
 def create_triangle_outline(vertices):
     #Create a new mesh and object for the triangle outline

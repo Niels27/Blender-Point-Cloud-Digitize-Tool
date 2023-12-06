@@ -297,9 +297,6 @@ def store_object_state(obj):
         'mesh': obj.data.copy() 
     }
     
-    #undo_stack.append(obj_state) 
-    #Clear the redo stack
-    #redo_stack.clear()     
 
 #Set origin to geometry center based on object type   
 def set_origin_to_geometry_center(obj):

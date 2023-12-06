@@ -187,42 +187,6 @@ class ExportToShapeFileOperator(bpy.types.Operator):
 
         #Return {'FINISHED'} to indicate that the operation was successful
         return {'FINISHED'}
-                 
-class OBJECT_OT_simple_undo(bpy.types.Operator):
-    bl_idname = "object.simple_undo"
-    bl_label = "Simple Undo"
-    
-    def execute(self, context):
-        if undo_stack:
-            obj_state = undo_stack.pop()
-            for obj in bpy.context.scene.objects:
-                if obj_state['name'] in obj.name:
-                    bpy.data.objects.remove(obj)
-                    redo_stack.append(obj_state)
-        return {'FINISHED'}
-        
-class OBJECT_OT_simple_redo(bpy.types.Operator):
-    bl_idname = "object.simple_redo"
-    bl_label = "Simple Redo"
-    
-    def execute(self, context):
-        if redo_stack:
-            obj_state = redo_stack.pop()
-            undo_stack.append(obj_state)
-
-            mesh = obj_state['mesh']
-            obj = bpy.data.objects.new(obj_state['name'], mesh)
-
-            bpy.context.collection.objects.link(obj)
-
-            obj.location = obj_state['location']
-            obj.rotation_euler = obj_state['rotation']
-            obj.scale = obj_state['scale']
-
-            #Ensure the object is updated in the 3D view
-            obj.update_tag()
-            
-        return {'FINISHED'}
 
 class CreatePointCloudObjectOperator(bpy.types.Operator):
     

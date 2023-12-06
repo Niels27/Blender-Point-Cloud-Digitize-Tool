@@ -67,8 +67,7 @@ def register():
     bpy.utils.register_class(CenterPointCloudOperator)
     bpy.utils.register_class(ExportToShapeFileOperator)
     bpy.utils.register_class(FindALlRoadMarkingsOperator)
-    bpy.utils.register_class(OBJECT_OT_simple_undo)
-    bpy.utils.register_class(OBJECT_OT_simple_redo)
+
     bpy.types.Scene.point_size = IntProperty(name="POINT SIZE",
                                       default=1)
     bpy.types.Scene.sparsity_value = IntProperty(name="SPARSITY VALUE",
