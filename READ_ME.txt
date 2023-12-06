@@ -47,6 +47,8 @@ Auto curvedline: draws curved polyline as far as it can go, it uses middle point
 Save shapes: saves a small picture of every shape drawn from now on in road_mark_images
 Show dots: some functions create small feedback dots, useful for debugging
 
+Full script has undo/redo buttons for drawn shapes because ctrl+z also undos code.. The add-on does not have those buttons, there can just use ctrl+z/ctrl+shift+z
+
 More detailed instructions and full documentation are being made.
 -----------------------------------------------------------------------------------
 
