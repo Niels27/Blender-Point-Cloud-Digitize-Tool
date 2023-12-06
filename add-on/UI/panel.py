@@ -51,7 +51,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         layout.operator("custom.auto_mark_triangle", text="auto triangle marker")
         layout.operator("custom.mark_rectangle", text="rectangle marker")
         layout.operator("custom.auto_mark_rectangle", text="auto rectangle marker")
-        layout.operator("custom.mark_curved_line", text="curved line marker") 
+        layout.operator("custom.mark_snapping_line", text="snapping line marker") 
         row = layout.row()
         row.prop(scene, "snap_to_road_mark")
         layout.operator("custom.auto_curved_line", text="auto curved line")  

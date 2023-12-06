@@ -62,7 +62,7 @@ def register():
     bpy.utils.register_class(RectangleMarkOperator)
     bpy.utils.register_class(AutoRectangleMarkOperator)
     bpy.utils.register_class(AutoCurvedLineOperator)
-    bpy.utils.register_class(CurvedLineMarkOperator)
+    bpy.utils.register_class(SnappingLineMarkOperator)
     bpy.utils.register_class(CorrectionPopUpOperator)
     bpy.utils.register_class(CenterPointCloudOperator)
     bpy.utils.register_class(ExportToShapeFileOperator)
@@ -189,7 +189,7 @@ def unregister():
     bpy.utils.unregister_class(RectangleMarkOperator) 
     bpy.utils.unregister_class(AutoRectangleMarkOperator) 
     bpy.utils.unregister_class(AutoCurvedLineOperator)
-    bpy.utils.unregister_class(CurvedLineMarkOperator)
+    bpy.utils.unregister_class(SnappingLineMarkOperator)
     
     bpy.utils.unregister_class(CreatePointCloudObjectOperator)
     bpy.utils.unregister_class(CorrectionPopUpOperator)
@@ -209,9 +209,6 @@ def unregister():
     del bpy.types.Scene.z_height_cut_off
     del bpy.types.Scene.extra_z_height
     del bpy.types.Scene.points_percentage
-    
-    bpy.utils.unregister_class(OBJECT_OT_simple_undo)
-    bpy.utils.unregister_class(OBJECT_OT_simple_redo)
                  
 if __name__ == "__main__":
     register()

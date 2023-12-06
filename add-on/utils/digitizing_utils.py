@@ -317,7 +317,7 @@ def create_mesh_with_material(obj_name, shape_coords, marking_color, transparenc
     obj.data.materials.append(mat)
     return obj
 
-def draw_line(self, context, event):
+def draw_line(self, context, event,point_coords, point_colors, points_kdtree):
 
     if not hasattr(self, 'click_counter'):
         self.click_counter = 0
@@ -336,10 +336,12 @@ def draw_line(self, context, event):
     coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
     coord_3d_end.z += extra_z_height  #Add to the z dimension to prevent clipping
 
+    self.click_counter += 1
+    
     # Update the line if snapping is enabled
     if snap_to_road_mark and self.click_counter > 1:
         coord_3d_start = self.prev_end_point
-        new_start, new_end = snap_line_to_road_mark(self, context, coord_3d_start, coord_3d_end)
+        new_start, new_end = snap_line_to_road_mark(self, context, coord_3d_start, coord_3d_end,point_coords, point_colors, points_kdtree)
         create_rectangle_line_object(new_start, new_end)  # Redraw line with snapped coordinates
 
     self.prev_end_point = coord_3d_end  # Update the previous end point

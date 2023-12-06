@@ -17,7 +17,7 @@ import pandas as pd
 import geopandas as gpd
 
 
-
+from ..utils.math_utils import region_growing
 
 #global variables
 last_processed_index = 0 #Global variable to keep track of the last processed index, for numbering road marks
@@ -33,7 +33,7 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
         
         if event.type == 'LEFTMOUSE':
             if event.value == 'RELEASE':
-                self.draw_line(context, event)
+                self.draw_thick_line(context, event)
                 return {'RUNNING_MODAL'}
         elif event.type == 'RIGHTMOUSE' or event.type == 'ESC':
             return {'CANCELLED'}
@@ -46,7 +46,7 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
         context.window_manager.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
-    def draw_line(self, context, event):
+    def draw_thick_line(self, context, event):
         
         marking_color = context.scene.marking_color
         width = context.scene.fatline_width
@@ -1139,19 +1139,22 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
         print("Operator was properly cancelled")  #Debug message
         return {'CANCELLED'}
         
-class CurvedLineMarkOperator(bpy.types.Operator):
-    bl_idname = "custom.mark_curved_line"
-    bl_label = "Mark curved line"
+class SnappingLineMarkOperator(bpy.types.Operator):
+    bl_idname = "custom.mark_snapping_line"
+    bl_label = "Mark snapping line"
     
     prev_end_point = None
     _is_running = False  
     
     def modal(self, context, event):
+        pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
+        point_colors = pointcloud_data.point_colors
+        points_kdtree=  pointcloud_data.points_kdtree
         
-
         if event.type == 'LEFTMOUSE' and is_mouse_in_3d_view(context, event):
             if event.value == 'RELEASE':
-                draw_line(self, context, event)
+                draw_line(self, context, event, point_coords, point_colors, points_kdtree)
                 return {'RUNNING_MODAL'}
         elif event.type == 'RIGHTMOUSE' or event.type == 'ESC':
             return {'CANCELLED'}
@@ -1160,7 +1163,7 @@ class CurvedLineMarkOperator(bpy.types.Operator):
 
     def invoke(self, context, event):
 
-        if CurvedLineMarkOperator._is_running:
+        if SnappingLineMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
             self.cancel(context)
             return {'CANCELLED'}
@@ -1177,7 +1180,7 @@ class CurvedLineMarkOperator(bpy.types.Operator):
             context.object.select_set(True)
             bpy.ops.object.delete()  
             
-        CurvedLineMarkOperator._is_running = False
+        SnappingLineMarkOperator._is_running = False
         print("Operator was properly cancelled")
         return {'CANCELLED'}
     
@@ -1199,7 +1202,6 @@ class AutoCurvedLineOperator(bpy.types.Operator):
             
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
             
-            start_time = time.time()
             #Get the mouse coordinates
             x, y = event.mouse_region_x, event.mouse_region_y
             #Convert 2D mouse coordinates to 3D view coordinates
@@ -1216,7 +1218,7 @@ class AutoCurvedLineOperator(bpy.types.Operator):
             radius = 50
             _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
         
-            rectangle_coords = []
+            region_growth_coords = []
             
             #Get the average intensity of the nearest points
             average_intensity = get_average_intensity(nearest_indices[0],point_colors)
@@ -1228,28 +1230,14 @@ class AutoCurvedLineOperator(bpy.types.Operator):
             
             #Check if the average intensity indicates a road marking (white)
             if average_intensity > intensity_threshold:
-                #Region growing algorithm
-                checked_indices = set()
-                indices_to_check = list(nearest_indices[0])
-                print("Region growing started")
-                while indices_to_check:   
-                    current_index = indices_to_check.pop()
-                    if current_index not in checked_indices:
-                        checked_indices.add(current_index)
-                        intensity = np.average(point_colors[current_index]) #* 255  #grayscale
-                        if intensity>intensity_threshold:
-                            rectangle_coords.append(point_coords[current_index])
-                            _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
-                            indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
-
-                print("Region growing completed", time.time()-start_time)
+                region_growth_coords = region_growing(point_coords, point_colors, points_kdtree, nearest_indices, radius, intensity_threshold, region_growth_coords)
                 
             else:
                 print("no road markings found")
                 
-            if rectangle_coords:
+            if region_growth_coords:
                 #Create a single mesh for the combined  rectangles
-                create_shape(rectangle_coords,shape_type="curved line")
+                create_shape(region_growth_coords,shape_type="curved line")
                 
         elif event.type == 'ESC':
             SimpleMarkOperator._is_running = False

@@ -6,13 +6,15 @@ Optional is: a web environment for the interface, implementing AI assistance or 
 
 INSTRUCTIONS
 --------------------------------------------------------------------------------------
-Confirmed to work with blender versions 3.4-3.6
+Confirmed to work with blender versions 3.4-3.6. Python used: 3.10.12
 
 How to install as add-on: Blender->Edit->Preferences->add-ons->install->add-on.zip
-Changed add-on scripts? -> make new zip file of add-on folder
+Changed add-on scripts? -> make new zip file of add-on folder. Often needs blender restart to prevent errrors
 
 To develop, use in-blender script. To do so, open text-> full script.py. Then run with alt+p
 To save time, it has Auto load auto.laz function, will quickly import a laz file called auto.laz on script execution.
+
+Libraries: full script.py has functions to install multiple libraries at once. Alternatively use: from pip._internal import main and then main(['install','libraryname']) in blender console.
 
 Manual import takes 1-3 minutes first time, but 60-70% faster subsequent times. ~2Gb+ .laz are unstable.
 Export to shapefile can take 5-10 minutes. Lower points percentage to 10-20% to speed it up. 

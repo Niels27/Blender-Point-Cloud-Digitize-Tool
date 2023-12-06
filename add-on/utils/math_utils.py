@@ -187,6 +187,23 @@ def create_middle_points(coords_list, num_segments=10):
     
     return middle_points
 
-
+def region_growing(point_coords, point_colors, points_kdtree, nearest_indices, radius, intensity_threshold, region_growth_coords):
+#Region growing algorithm
+    start_time = time.time()
+    checked_indices = set()
+    indices_to_check = list(nearest_indices[0])
+    print("Region growing started")
+    while indices_to_check:   
+        current_index = indices_to_check.pop()
+        if current_index not in checked_indices:
+            checked_indices.add(current_index)
+            intensity = np.average(point_colors[current_index]) #* 255  #grayscale
+            if intensity>intensity_threshold:
+                region_growth_coords.append(point_coords[current_index])
+                _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
+                indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
+    print("Region growing completed in: ", time.time()-start_time)
+    return region_growth_coords
+    
 #module imports
 from ..utils.digitizing_utils import mark_point
