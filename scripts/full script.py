@@ -1504,8 +1504,8 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
         print("Operator was properly cancelled")  #Debug message
         return {'CANCELLED'}
         
-class CurvedLineMarkOperator(bpy.types.Operator):
-    bl_idname = "custom.mark_curved_line"
+class SnappingLineMarkOperator(bpy.types.Operator):
+    bl_idname = "custom.mark_snapping_line"
     bl_label = "Mark curved line"
     
     prev_end_point = None
@@ -1524,7 +1524,7 @@ class CurvedLineMarkOperator(bpy.types.Operator):
 
     def invoke(self, context, event):
 
-        if CurvedLineMarkOperator._is_running:
+        if SnappingLineMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
             self.cancel(context)
             return {'CANCELLED'}
@@ -1541,7 +1541,7 @@ class CurvedLineMarkOperator(bpy.types.Operator):
             context.object.select_set(True)
             bpy.ops.object.delete()  
             
-        CurvedLineMarkOperator._is_running = False
+        SnappingLineMarkOperator._is_running = False
         print("Operator was properly cancelled")
         return {'CANCELLED'}
     
@@ -2881,7 +2881,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         layout.operator("custom.auto_mark_triangle", text="auto triangle marker")
         layout.operator("custom.mark_rectangle", text="rectangle marker")
         layout.operator("custom.auto_mark_rectangle", text="auto rectangle marker")
-        layout.operator("custom.mark_curved_line", text="curved line marker") 
+        layout.operator("custom.mark_snapping_line", text="snapping line marker") 
         row = layout.row()
         row.prop(scene, "snap_to_road_mark")
         layout.operator("custom.auto_curved_line", text="auto curved line")  
@@ -2920,7 +2920,7 @@ def register():
     bpy.utils.register_class(RectangleMarkOperator)
     bpy.utils.register_class(AutoRectangleMarkOperator)
     bpy.utils.register_class(AutoCurvedLineOperator)
-    bpy.utils.register_class(CurvedLineMarkOperator)
+    bpy.utils.register_class(SnappingLineMarkOperator)
     bpy.utils.register_class(CorrectionPopUpOperator)
     bpy.utils.register_class(CenterPointCloudOperator)
     bpy.utils.register_class(ExportToShapeFileOperator)
@@ -3049,7 +3049,7 @@ def unregister():
     bpy.utils.unregister_class(RectangleMarkOperator) 
     bpy.utils.unregister_class(AutoRectangleMarkOperator) 
     bpy.utils.unregister_class(AutoCurvedLineOperator)
-    bpy.utils.unregister_class(CurvedLineMarkOperator)
+    bpy.utils.unregister_class(SnappingLineMarkOperator)
     
     bpy.utils.unregister_class(CreatePointCloudObjectOperator)
     bpy.utils.unregister_class(CorrectionPopUpOperator)
