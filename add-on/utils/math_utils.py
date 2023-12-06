@@ -16,10 +16,6 @@ from functools import partial
 from sklearn.cluster import DBSCAN 
 from scipy.interpolate import UnivariateSpline, make_interp_spline,CubicSpline
 
-
-#module imports
-from ..utils.digitizing_utils import mark_point
-
 def get_average_intensity(indices,point_colors):
     #If indices is a NumPy array with more than one dimension, flatten it
     if isinstance(indices, np.ndarray) and indices.ndim > 1:
@@ -190,3 +186,7 @@ def create_middle_points(coords_list, num_segments=10):
     mark_point(bottom_right,"bottom_right")
     
     return middle_points
+
+
+#module imports
+from ..utils.digitizing_utils import mark_point

@@ -6,7 +6,7 @@ bl_info = {
     "author": "Niels van der Wal",
     "version": (1, 0, 0),
     "blender": (3, 4, 0),  # Replace with the minimum Blender version your script is compatible with
-    "location": "View3D > Tool Shelf > My Add-On Tab",
+    "location": "View3D > Tools > Digitize Tool",
     "category": "3D View"
 }
 
@@ -32,7 +32,8 @@ from bpy.props import StringProperty, IntProperty, FloatProperty, BoolProperty
 print(sys.executable)
 print(sys.version)
 
-from .utils.blender_utils import install_libraries, update_libraries, uninstall_libraries   
+#install libraries
+#from .utils.blender_utils import install_libraries, update_libraries, uninstall_libraries
 #install_libraries('library_list')
 #update_libraries()
 #uninstall_libraries()
@@ -40,7 +41,7 @@ from .utils.blender_utils import install_libraries, update_libraries, uninstall_
 #module imports
 from .operators.utility_operators import *
 from .operators.drawing_operators import *
-from . UI.panel import *
+from . UI.panel import DIGITIZE_PT_Panel
 
 #Register the operators and panel
 def register():

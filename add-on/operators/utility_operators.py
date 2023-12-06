@@ -16,18 +16,11 @@ import mathutils
 import pandas as pd
 import geopandas as gpd
 
-
-#module imports
-from ..utils.math_utils import *
-from ..utils.blender_utils import *
-
 #global variables
 collection_name = "Collection" #the collection name in blender
 point_cloud_point_size =  1 #The size of the points in the point cloud
-pointcloud_data = GetPointCloudData()
-point_coords = pointcloud_data.point_coords
-point_colors = pointcloud_data.point_colors
-points_kdtree = pointcloud_data.points_kdtree
+undo_stack = [] #Keeps track of all objects created/removed for undo functions
+redo_stack = []#Keeps track of all objects created/removed for redo functions
 
 class LAS_OT_OpenOperator(bpy.types.Operator):
     
@@ -36,14 +29,16 @@ class LAS_OT_OpenOperator(bpy.types.Operator):
 
     filepath: bpy.props.StringProperty(subtype="FILE_PATH")
     
-    
     def execute(self, context):
         start_time = time.time()
       
         bpy.context.scene["Filepath to the loaded pointcloud"] = self.filepath
         sparsity_value = bpy.context.scene.sparsity_value
         point_size = bpy.context.scene.point_size
-        pointcloud_data.pointcloud_load_optimized(self.filepath, point_size, sparsity_value)
+        points_percentage=bpy.context.scene.points_percentage
+        z_height_cut_off=bpy.context.scene.z_height_cut_off
+        pointcloud_data = GetPointCloudData()
+        pointcloud_data.pointcloud_load_optimized(self.filepath, point_size, sparsity_value,points_percentage,z_height_cut_off)
         print("Opened LAS/LAZ file: ", self.filepath,"in %s seconds" % (time.time() - start_time))
         return {'FINISHED'}
 
@@ -57,7 +52,6 @@ class RemoveAllObjectsOperator(bpy.types.Operator):
     bl_label = "Remove All Lines"
 
     def execute(self, context):
-        global shape_counter
         bpy.ops.object.select_all(action='DESELECT')
         bpy.ops.object.select_by_type(type='CURVE')
         for obj in bpy.context.scene.objects:
@@ -65,7 +59,6 @@ class RemoveAllObjectsOperator(bpy.types.Operator):
             bpy.data.objects.remove(obj)
         bpy.ops.object.delete()
         print("All markings cleared")
-        shape_counter = 1
         return {'FINISHED'}
     
 class RemovePointCloudOperator(bpy.types.Operator):
@@ -95,7 +88,10 @@ class GetPointsInfoOperator(bpy.types.Operator):
 
     def modal(self, context, event):
         
-        global point_coords, point_colors, points_kdtree
+        #access singleton of point cloud data with updated values
+        pointcloud_data = GetPointCloudData()
+        point_colors = pointcloud_data.point_colors
+        points_kdtree = pointcloud_data.points_kdtree
         
         if event.type == 'MOUSEMOVE':  
             self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
@@ -148,9 +144,11 @@ class CenterPointCloudOperator(bpy.types.Operator):
 
     def execute(self, context):
        
-        global point_coords
-
-        #Calculate the bounding box of the point cloud
+        #access singleton of point cloud data with updated values
+        pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
+    
+        #calculate the bounding box of the point cloud
         min_coords = np.min(point_coords, axis=0)
         max_coords = np.max(point_coords, axis=0)
         bbox_center = (min_coords + max_coords) / 2
@@ -178,7 +176,11 @@ class ExportToShapeFileOperator(bpy.types.Operator):
     bl_description = "Export the current point cloud to a shapefile"
 
     def execute(self, context):
-        global point_coords
+        
+        #access singleton of point cloud data with updated values
+        pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
+        
         points_percentage=context.scene.points_percentage
         #Call the function to export the point cloud data to a shapefile
         export_as_shapefile(point_coords,points_percentage)
@@ -227,8 +229,8 @@ class CreatePointCloudObjectOperator(bpy.types.Operator):
     bl_idname = "custom.create_point_cloud_object"
     bl_label = "Create point cloud object"
     
-    global point_coords, point_colors, point_cloud_point_size, collection_name
-    
+    global point_cloud_point_size, collection_name
+
     #creates a blender object from the point cloud data
     def create_point_cloud_object(self, points_ar, colors_ar, point_size, collection_name):
     
@@ -300,6 +302,9 @@ class CreatePointCloudObjectOperator(bpy.types.Operator):
    
     def execute(self, context):
         start_time = time.time()
+        pointcloud_data = GetPointCloudData()
+        point_coords=pointcloud_data.point_coords
+        point_colors=pointcloud_data.point_colors
         self.create_point_cloud_object(point_coords,point_colors, point_cloud_point_size, collection_name)
         print("--- %s seconds ---" % (time.time() - start_time))
         return {'FINISHED'}
@@ -358,4 +363,8 @@ class CorrectionPopUpOperator(bpy.types.Operator):
     def invoke(self, context, event):
         wm = context.window_manager
         return wm.invoke_props_dialog(self)
-            
+    
+    
+#module imports
+from ..utils.blender_utils import GetPointCloudData, is_mouse_in_3d_view, redraw_viewport, export_as_shapefile, is_click_on_white
+from ..utils.math_utils import get_average_intensity

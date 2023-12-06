@@ -1,6 +1,5 @@
 #library imports
 import bpy
-from bpy import context
 from bpy_extras.view3d_utils import region_2d_to_location_3d
 import bmesh
 from bpy_extras import view3d_utils
@@ -18,17 +17,10 @@ import pandas as pd
 import geopandas as gpd
 
 
-#module imports
-from ..utils.blender_utils import *
-from ..utils.digitizing_utils import *
-from ..utils.math_utils import *
+
 
 #global variables
 last_processed_index = 0 #Global variable to keep track of the last processed index, for numbering road marks
-pointcloud_data = GetPointCloudData()
-point_coords = pointcloud_data.point_coords
-point_colors = pointcloud_data.point_colors
-points_kdtree=  pointcloud_data.points_kdtree
 
 #Defines an Operator for drawing a free thick straight line in the viewport using mouseclicks
 class DrawStraightFatLineOperator(bpy.types.Operator):
@@ -121,7 +113,12 @@ class SimpleMarkOperator(bpy.types.Operator):
     _is_running = False  #Class variable to check if the operator is already running
     
     def modal(self, context, event):
-        global point_coords, point_colors, points_kdtree
+        
+        pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
+        point_colors = pointcloud_data.point_colors
+        points_kdtree=  pointcloud_data.points_kdtree
+        
         intensity_threshold = context.scene.intensity_threshold
         
         if event.type == 'MOUSEMOVE':  
@@ -149,7 +146,7 @@ class SimpleMarkOperator(bpy.types.Operator):
             rectangle_coords = []
             
             #Get the average intensity of the nearest points
-            average_intensity = get_average_intensity(nearest_indices[0])
+            average_intensity = get_average_intensity(nearest_indices[0],point_colors)
            
              #Get the average color of the nearest points
             average_color = get_average_color(nearest_indices[0], point_colors)
@@ -216,7 +213,11 @@ class ComplexMarkOperator(bpy.types.Operator):
     
     def modal(self, context, event):
         
-        global point_coords, point_colors, points_kdtree
+        pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
+        point_colors = pointcloud_data.point_colors
+        points_kdtree=  pointcloud_data.points_kdtree
+        
         intensity_threshold = context.scene.intensity_threshold
         if event.type == 'MOUSEMOVE':  
             self.mouse_inside_view3d = is_mouse_in_3d_view(context, event) 
@@ -245,7 +246,7 @@ class ComplexMarkOperator(bpy.types.Operator):
                 rectangle_coords = []
                 
                 #Get the average intensity of the nearest points
-                average_intensity = get_average_intensity(nearest_indices[0])
+                average_intensity = get_average_intensity(nearest_indices[0],point_colors)
                            
                  #Get the average color of the nearest points
                 average_color = get_average_color(nearest_indices[0],point_colors)
@@ -315,7 +316,11 @@ class FindALlRoadMarkingsOperator(bpy.types.Operator):
         start_time = time.time()
         print("Start auto detecting up to",markings_threshold, "road markings.. this could take a while")
         
-        global point_coords, point_colors, points_kdtree
+        pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
+        point_colors = pointcloud_data.point_colors
+        points_kdtree=  pointcloud_data.points_kdtree
+
         intensity_threshold = context.scene.intensity_threshold
        
         point_threshold = 100
@@ -375,7 +380,11 @@ class SelectionDetectionOpterator(bpy.types.Operator):
 
     def modal(self, context, event):
         
-        global point_coords, point_colors, points_kdtree 
+        pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
+        point_colors = pointcloud_data.point_colors
+        points_kdtree=  pointcloud_data.points_kdtree
+        
         if event.type == 'MOUSEMOVE':  
             self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
             
@@ -396,7 +405,7 @@ class SelectionDetectionOpterator(bpy.types.Operator):
             self.click_count += 1
             if self.click_count >= 2:
                 #Find and visualize white objects within the specified region
-                self.find_white_objects_within_region()
+                self.find_white_objects_within_region(context,point_coords,point_colors)
                 return {'FINISHED'}
             for obj in bpy.context.scene.objects:
                 if "BoundingBox" in obj.name:
@@ -416,10 +425,8 @@ class SelectionDetectionOpterator(bpy.types.Operator):
         else:
             return {'CANCELLED'}
     
-    def find_white_objects_within_region(self):
+    def find_white_objects_within_region(self, context,point_coords,point_colors):
        
-        global point_coords, point_colors, points_kdtree,intensity_threshold
-
         #Define bounding box limits
         min_corner = np.min(self.region_corners, axis=0)
         max_corner = np.max(self.region_corners, axis=0)
@@ -438,7 +445,7 @@ class SelectionDetectionOpterator(bpy.types.Operator):
         point_threshold = 100
         radius = 100
         max_white_objects = 100
-        intensity_threshold=intensity_threshold
+        intensity_threshold=context.scene.intensity_threshold
         #Intensity calculation
         intensities = np.mean(filtered_colors, axis=1) #* 255  
         checked_indices = set()
@@ -521,9 +528,16 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
     _simulated_clicks = 0  #Count of simulated clicks
     _found_triangles = 0   #Count of triangles found
     _processed_indices = set()
+    
+
                 
     def modal(self, context, event):
-        global point_coords, point_colors, points_kdtree
+        
+        pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
+        point_colors = pointcloud_data.point_colors
+        points_kdtree=  pointcloud_data.points_kdtree
+    
         intensity_threshold = context.scene.intensity_threshold
         
         if event.type == 'MOUSEMOVE':  
@@ -551,7 +565,7 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
             triangle_coords = []
             
             #Get the average intensity of the nearest points
-            average_intensity = get_average_intensity(nearest_indices[0])
+            average_intensity = get_average_intensity(nearest_indices[0],point_colors)
            
              #Get the average color of the nearest points
             average_color = get_average_color(nearest_indices[0],point_colors)
@@ -589,7 +603,7 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
 
                 if(len(self._triangles)) >= 2:
                     outer_corners= self.find_closest_corners(self._triangles[0], self._triangles[1])
-                    self.perform_automatic_marking(context, intensity_threshold, outer_corners)
+                    self.perform_automatic_marking(context, intensity_threshold,point_coords,point_colors,points_kdtree )
                     
         elif event.type == 'ESC':
             self.cancel(context)
@@ -612,7 +626,7 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
         return closest_corners
 
     
-    def perform_automatic_marking(self, context, intensity_threshold, outer_corners):
+    def perform_automatic_marking(self, context, intensity_threshold,point_coords,point_colors,points_kdtree):
         line_points = []
         # Calculate centers before popping the final triangle
         centers = [np.mean(triangle, axis=0) for triangle in self._triangles]
@@ -623,7 +637,7 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
         # Automatically mark the triangles in between
         middle_points = self.interpolate_line(centers[0], centers[1])
         for point in middle_points:
-            self.simulate_click_and_grow(point, context, intensity_threshold, outer_corners)
+            self.simulate_click_and_grow(point, context, intensity_threshold, point_coords,point_colors,points_kdtree)
 
         # Add the final triangle back to the end of the list
         self._triangles.append(final_triangle)
@@ -664,15 +678,14 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
 
         return bottom_corners
             
-    def simulate_click_and_grow(self, location, context, intensity_threshold, outer_corners):
-        global point_coords, point_colors, points_kdtree
-
+    def simulate_click_and_grow(self, location, context, intensity_threshold, point_coords,point_colors,points_kdtree):
+        
         _, nearest_indices = points_kdtree.query([location], k=16)
-        average_intensity = get_average_intensity(nearest_indices[0])
+        average_intensity = get_average_intensity(nearest_indices[0],point_colors)
         average_color = get_average_color(nearest_indices[0],point_colors)
 
         if (average_intensity > intensity_threshold) and not self._processed_indices.intersection(nearest_indices[0]):
-            #Proceed only if the intensity is above the threshold and the area hasn't been processed yet
+            #Proceed if the intensity is above the threshold and the area hasn't been processed yet
             checked_indices = set()
             indices_to_check = list(nearest_indices[0])
 
@@ -692,8 +705,6 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
                 triangle_vertices = create_flexible_triangle(filtered_points)
                 self._triangles.append(triangle_vertices)
                 self._found_triangles += 1
-                #move_triangle_to_line(triangle_vertices, outer_corners[0], outer_corners[1])
-                #create_shape(filtered_points, shape_type="triangle", vertices=triangle_vertices)
                 create_shape(filtered_points, shape_type="flexible triangle", vertices=triangle_vertices)
                 
     def interpolate_line(self, start, end, num_points=50):
@@ -730,9 +741,14 @@ class TriangleMarkOperator(bpy.types.Operator):
     _triangles = []  #List to store the triangle vertices
     _processed_indices = set()
     _last_outer_corner = None  #Initialize the last outer corner here   
-         
+    
     def modal(self, context, event):
-        global point_coords, point_colors, points_kdtree
+        
+        pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
+        point_colors = pointcloud_data.point_colors
+        points_kdtree=  pointcloud_data.points_kdtree
+        
         intensity_threshold = context.scene.intensity_threshold
         extra_z_height = context.scene.extra_z_height
         if event.type == 'MOUSEMOVE':  
@@ -740,7 +756,7 @@ class TriangleMarkOperator(bpy.types.Operator):
             
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS' and self.mouse_inside_view3d:
             #Process the mouse click
-            self.process_mouse_click(context, event,intensity_threshold)
+            self.process_mouse_click(context, event,intensity_threshold,point_coords,point_colors,points_kdtree)
 
         elif event.type == 'ESC':
             self.cancel(context)
@@ -748,14 +764,14 @@ class TriangleMarkOperator(bpy.types.Operator):
         
         return {'RUNNING_MODAL'}
 
-    def process_mouse_click(self, context,event, intensity_threshold):
+    def process_mouse_click(self, context,event, intensity_threshold,point_coords,point_colors,points_kdtree):
         #Get the mouse coordinates
         x, y = event.mouse_region_x, event.mouse_region_y
         location = region_2d_to_location_3d(context.region, context.space_data.region_3d, (x, y), (0, 0, 0))
         triangle_coords=[]
         #Nearest-neighbor search
         _, nearest_indices = points_kdtree.query([location], k=16)
-        average_intensity = get_average_intensity(nearest_indices[0])
+        average_intensity = get_average_intensity(nearest_indices[0],point_colors)
         average_color = get_average_color(nearest_indices[0],point_colors)
         if average_intensity > intensity_threshold:
             #Region growing algorithm
@@ -866,7 +882,12 @@ class RectangleMarkOperator(bpy.types.Operator):
     _is_running = False  #Class variable to check if the operator is already running
     
     def modal(self, context, event):
-        global point_coords, point_colors, points_kdtree
+        
+        pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
+        point_colors = pointcloud_data.point_colors
+        points_kdtree=  pointcloud_data.points_kdtree
+        
         intensity_threshold = context.scene.intensity_threshold
         
         if event.type == 'MOUSEMOVE':  
@@ -894,7 +915,7 @@ class RectangleMarkOperator(bpy.types.Operator):
             rectangle_coords = []
             
             #Get the average intensity of the nearest points
-            average_intensity = get_average_intensity(nearest_indices[0])
+            average_intensity = get_average_intensity(nearest_indices[0],point_colors)
            
              #Get the average color of the nearest points
             average_color = get_average_color(nearest_indices[0],point_colors)
@@ -962,9 +983,13 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
     _simulated_clicks = 0  #Count of simulated clicks
     _found_rectangles = 0   #Count of triangles found
     _processed_indices = set()
-                
+              
     def modal(self, context, event):
-        global point_coords, point_colors, points_kdtree
+        
+        pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
+        point_colors = pointcloud_data.point_colors
+        points_kdtree=  pointcloud_data.points_kdtree
         intensity_threshold = context.scene.intensity_threshold
         
         if event.type == 'MOUSEMOVE':  
@@ -992,7 +1017,7 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
             rectangle_coords = []
             
             #Get the average intensity of the nearest points
-            average_intensity = get_average_intensity(nearest_indices[0])
+            average_intensity = get_average_intensity(nearest_indices[0],point_colors)
            
              #Get the average color of the nearest points
             average_color = get_average_color(nearest_indices[0],point_colors)
@@ -1032,7 +1057,7 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
 
                 if len(self._rectangles) == 2:
                     #center_points= self.find_center_points(self._rectangles[0], self._rectangles[1])
-                    self.perform_automatic_marking(context, intensity_threshold)
+                    self.perform_automatic_marking(context, intensity_threshold,point_coords,point_colors,points_kdtree)
                 
         elif event.type == 'ESC':
             self.cancel(context)
@@ -1053,20 +1078,19 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
                     center_points = (point1, point2)
         return center_points
     
-    def perform_automatic_marking(self, context, intensity_threshold):
+    def perform_automatic_marking(self, context, intensity_threshold,point_coords,point_colors,points_kdtree):
         print("2 rectangles found, starting automatic marking..")
         if len(self._rectangles) >= 2:
             centers = [np.mean(rectangle, axis=0) for rectangle in self._rectangles[:2]]
             middle_points = self.interpolate_line(centers[0], centers[1])
             for point in middle_points:
                 mark_point(point,"ZebraCrossing",size=0.1)
-                self.simulate_click_and_grow(point, context, intensity_threshold)            
+                self.simulate_click_and_grow(point, context, intensity_threshold, point_coords,point_colors,points_kdtree)           
                 
-    def simulate_click_and_grow(self, location, context, intensity_threshold):
-        global point_coords, point_colors, points_kdtree
-
+    def simulate_click_and_grow(self, location, context, intensity_threshold, point_coords,point_colors,points_kdtree):
+        
         _, nearest_indices = points_kdtree.query([location], k=16)
-        average_intensity = get_average_intensity(nearest_indices[0])
+        average_intensity = get_average_intensity(nearest_indices[0],point_colors)
         average_color = get_average_color(nearest_indices[0],point_colors)
 
         if (average_intensity > intensity_threshold) and not self._processed_indices.intersection(nearest_indices[0]):
@@ -1145,14 +1169,6 @@ class CurvedLineMarkOperator(bpy.types.Operator):
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         
-        if context.area.type == 'VIEW_3D':
-            CurvedLineMarkOperator._is_running = True
-            context.window_manager.modal_handler_add(self)
-            return {'RUNNING_MODAL'}
-        else:
-            return {'CANCELLED'}
-
- 
     def cancel(self, context):
         
         if context.object:
@@ -1169,9 +1185,13 @@ class AutoCurvedLineOperator(bpy.types.Operator):
     bl_idname = "custom.auto_curved_line"
     bl_label = "Mark curved line" 
 
-    
     def modal(self, context, event):
-        global point_coords, point_colors, points_kdtree
+        
+        pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
+        point_colors = pointcloud_data.point_colors
+        points_kdtree=  pointcloud_data.points_kdtree
+        
         intensity_threshold = context.scene.intensity_threshold
         
         if event.type == 'MOUSEMOVE':  
@@ -1199,7 +1219,7 @@ class AutoCurvedLineOperator(bpy.types.Operator):
             rectangle_coords = []
             
             #Get the average intensity of the nearest points
-            average_intensity = get_average_intensity(nearest_indices[0])
+            average_intensity = get_average_intensity(nearest_indices[0],point_colors)
            
              #Get the average color of the nearest points
             average_color = get_average_color(nearest_indices[0],point_colors)
@@ -1262,8 +1282,6 @@ class FixedTriangleMarkOperator(bpy.types.Operator):
 
     def modal(self, context, event):
         
-        global point_coords, point_colors
-        
         if event.type == 'MOUSEMOVE':  
             self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
 
@@ -1302,9 +1320,7 @@ class FixedRectangleMarkOperator(bpy.types.Operator):
     bl_label = "mark a fixed rectangle"
 
     def modal(self, context, event):
-        
-        global point_coords, point_colors
-        
+
         if event.type == 'MOUSEMOVE':  
             self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
 
@@ -1338,3 +1354,7 @@ class FixedRectangleMarkOperator(bpy.types.Operator):
         else:
             return {'CANCELLED'}  
         
+#module imports
+from ..utils.blender_utils import GetPointCloudData, is_mouse_in_3d_view, store_object_state
+from ..utils.digitizing_utils import mark_point, create_shape, create_rectangle_line_object, create_polyline,create_flexible_triangle, create_dots_shape, draw_line, create_flexible_rectangle,create_fixed_square,draw_fixed_triangle
+from ..utils.math_utils import get_average_color, get_average_intensity, filter_noise_with_dbscan, move_triangle_to_line

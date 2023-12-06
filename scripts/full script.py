@@ -1513,7 +1513,6 @@ class CurvedLineMarkOperator(bpy.types.Operator):
     
     def modal(self, context, event):
         
-
         if event.type == 'LEFTMOUSE' and is_mouse_in_3d_view(context, event):
             if event.value == 'RELEASE':
                 draw_line(self, context, event)
@@ -1533,14 +1532,6 @@ class CurvedLineMarkOperator(bpy.types.Operator):
             self.prev_end_point = None
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
-        
-        if context.area.type == 'VIEW_3D':
-            CurvedLineMarkOperator._is_running = True
-            context.window_manager.modal_handler_add(self)
-            return {'RUNNING_MODAL'}
-        else:
-            return {'CANCELLED'}
-
  
     def cancel(self, context):
         
@@ -1559,9 +1550,6 @@ def draw_line(self, context, event):
     if not hasattr(self, 'click_counter'):
         self.click_counter = 0
 
-    marking_color = context.scene.marking_color
-    width = context.scene.fatline_width
-    intensity_threshold = context.scene.intensity_threshold
     snap_to_road_mark = context.scene.snap_to_road_mark
     extra_z_height = context.scene.extra_z_height
     
@@ -1588,7 +1576,7 @@ def draw_line(self, context, event):
 
 
 #function to correct the first or second click to the nearest road mark    
-def snap_line_to_road_mark(self, context, first_click_point, last_click_point,region_radius=50):
+def snap_line_to_road_mark(self, context, first_click_point, last_click_point,region_radius=2):
     
     intensity_threshold = context.scene.intensity_threshold
     global point_coords, point_colors, points_kdtree        
@@ -1613,8 +1601,6 @@ def snap_line_to_road_mark(self, context, first_click_point, last_click_point,re
                     region_points.append(point_coords[current_index])
                     _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
                     indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
-        for point in region_points: 
-            mark_point(point,"region_point",0.02)
         return region_points
     
     def find_outward_points(region_points, direction):
@@ -1657,11 +1643,10 @@ class CorrectionPopUpOperator(bpy.types.Operator):
     
     action: bpy.props.EnumProperty(
         items=[
-            ('DRAW', "Draw Line", "Draw the line anyway"),
-            ('CORRECT', "Correct Line", "Try to correct the line"),
-            ('CANCEL', "Cancel", "Cancel the drawing")
+            ('CONTINUE', "Draw Line", "Continue drawing the line"),
+            ('STOP', "Stop", "stop the drawing"),
         ],
-        default='DRAW',
+        default='STOP',
     )
     #Define the custom draw method
     def draw(self, context):
@@ -1669,7 +1654,7 @@ class CorrectionPopUpOperator(bpy.types.Operator):
         col = layout.column()
         
         #Add custom buttons to the UI
-        col.label(text=f"{self.click_to_correct} Click(s) might be incorrect")
+        col.label(text="Continue drawing the line?")
         col.label(text="Choose an action:")
         col.separator()
         
@@ -1680,18 +1665,15 @@ class CorrectionPopUpOperator(bpy.types.Operator):
         #Access the stored data to perform the correction
         coord_3d_start = Vector(self.start_point)
         coord_3d_end = Vector(self.end_point)
-        click_to_correct = self.click_to_correct
         
-        #print("User chose to", "draw" if self.action == 'DRAW' else "correct")
-        #Based on the user's choice, either draw or initiate a correction process
+        #Based on the user's choice, either draw or start a correction process
         context.scene.user_input_result = self.action
        
-        if self.action == 'CORRECT':
-            coord_3d_start, coord_3d_end = snap_line_to_road_mark(self,context, coord_3d_start, coord_3d_end, click_to_correct)
-            create_rectangle_line_object(coord_3d_start, coord_3d_end)
+        if self.action == 'CONTINUE':
+            print("Trying to continue the line..")
         
-        elif self.action == ('CANCEL'):
-            print("Canceled line drawing")
+        elif self.action == ('STOP'):
+            print("Ended line drawing")
             return {'CANCELLED'}
         
         return {'FINISHED'}
@@ -1975,7 +1957,7 @@ def move_blender_triangle_objects(new_vertices, line_start, line_end):
     for obj in bpy.data.objects:
         if "Triangle Shape" in obj.name and obj.type == 'MESH':
             if len(obj.data.vertices) >= 3:
-                #Assuming the object represents a triangle
+                
                 current_triangle = [obj.data.vertices[i].co for i in range(3)]
                 moved_triangle = move_triangle_to_line(current_triangle, line_start, line_end)
 

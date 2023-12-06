@@ -1,6 +1,5 @@
 # UI/panel
 import bpy
-from bpy import context
 
 #Panel for the Road Marking Digitizer
 class DIGITIZE_PT_Panel(bpy.types.Panel):

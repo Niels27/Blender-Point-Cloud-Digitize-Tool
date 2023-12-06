@@ -1,6 +1,5 @@
 #library imports
 import bpy
-from bpy import context
 from bpy_extras.view3d_utils import region_2d_to_location_3d
 import gpu
 import bmesh
@@ -18,11 +17,6 @@ import mathutils
 import pandas as pd
 import geopandas as gpd
 
-
-#module imports
-from ..utils.blender_utils import *
-from ..utils.math_utils import *
-
 #global variables
 shape_counter=1 #Keeps track of amount of shapes drawn, used to number them
 
@@ -30,7 +24,7 @@ def move_blender_triangle_objects(new_vertices, line_start, line_end):
     for obj in bpy.data.objects:
         if "Triangle Shape" in obj.name and obj.type == 'MESH':
             if len(obj.data.vertices) >= 3:
-                #Assuming the object represents a triangle
+                
                 current_triangle = [obj.data.vertices[i].co for i in range(3)]
                 moved_triangle = move_triangle_to_line(current_triangle, line_start, line_end)
 
@@ -247,7 +241,7 @@ def create_shape(coords_list, shape_type,vertices=None):
     start_time = time.time()
     marking_color = bpy.context.scene.marking_color 
     transparency = bpy.context.scene.marking_transparency
-    line_width = context.scene.fatline_width
+    line_width = bpy.context.scene.fatline_width
     shape_coords = None  #Default to original coordinates
     coords_list=filter_noise_with_dbscan(coords_list)
     
@@ -297,7 +291,7 @@ def create_shape(coords_list, shape_type,vertices=None):
   
 def create_mesh_with_material(obj_name, shape_coords, marking_color, transparency):
     
-    extra_z_height = context.scene.extra_z_height
+    extra_z_height = bpy.context.scene.extra_z_height
     shape_coords = [(x, y, z + extra_z_height) for x, y, z in shape_coords]
         
     mesh = bpy.data.meshes.new(obj_name + "_mesh")
@@ -342,12 +336,7 @@ def draw_line(self, context, event):
     coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
     coord_3d_end.z += extra_z_height  #Add to the z dimension to prevent clipping
 
-    #Check if the current click is on a white road mark
-    on_white_end = is_click_on_white(self, context, coord_3d_end)
-    self.click_counter += 1
-    print(f"Mouseclick {self.click_counter} is {'on' if on_white_end else 'not on'} a white road mark.")
     # Update the line if snapping is enabled
-    
     if snap_to_road_mark and self.click_counter > 1:
         coord_3d_start = self.prev_end_point
         new_start, new_end = snap_line_to_road_mark(self, context, coord_3d_start, coord_3d_end)
@@ -432,9 +421,9 @@ def create_dots_shape(coords_list):
     start_time=time.time()
     global shape_counter
     
-    marking_color=context.scene.marking_color
+    marking_color=bpy.context.scene.marking_color
     transparency = bpy.context.scene.marking_transparency
-    extra_z_height = context.scene.extra_z_height
+    extra_z_height = bpy.context.scene.extra_z_height
     
     #Create a new mesh and link it to the scene
     mesh = bpy.data.meshes.new("Combined Shape")
@@ -512,7 +501,7 @@ def create_dots_shape(coords_list):
 #function to draw tiny marks on a given point
 def mark_point(point, name="point", size=0.05):
     
-    show_dots=context.scene.show_dots
+    show_dots=bpy.context.scene.show_dots
     
     if show_dots:
         #Create a cube to mark the point
@@ -554,10 +543,6 @@ def create_triangle_outline(vertices):
     #Ensure the object scale is applied
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-    
-    #wireframe thickness, does not work
-    '''wireframe_modifier = obj.modifiers.new(name="Wireframe", type='WIREFRAME')
-    wireframe_modifier.thickness = 0.1 #Adjust this value for desired thickness'''
     
     store_object_state(obj)
     
@@ -619,3 +604,7 @@ def snap_line_to_road_mark(self, context, first_click_point, last_click_point,po
     new_first_click_point, new_last_click_point = snap_last_point(first_click_point, last_click_point)
     print("Snapped to road mark")
     return new_first_click_point, new_last_click_point
+
+#module imports
+from ..utils.blender_utils import store_object_state, is_click_on_white
+from ..utils.math_utils import create_middle_points, filter_noise_with_dbscan, move_triangle_to_line

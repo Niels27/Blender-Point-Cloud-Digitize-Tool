@@ -2,7 +2,6 @@
 import sys
 import os
 import bpy
-from bpy import context
 import gpu
 import bmesh
 from gpu_extras.batch import batch_for_shader
@@ -28,35 +27,32 @@ import subprocess
 import json
 from shapely.geometry import Point
 
-#module imports
-from .math_utils import *
-from .shape_recognition_utils import save_shape_as_image
-
 #global variables
 use_pickled_kdtree=True
 save_json=False
 point_cloud_name="Point cloud"
 point_cloud_point_size=1
-undo_stack = [] #Keeps track of all objects created/removed for undo functions
-redo_stack = []#Keeps track of all objects created/removed for redo functions
-
 
 class GetPointCloudData:
-    def __init__(self):
-        self.points_kdtree = None
-        self.point_coords = None
-        self.point_colors = None
-        self.original_coords = None
-
+    _instance = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(GetPointCloudData, cls).__new__(cls)
+            cls._instance.point_coords = None
+            cls._instance.point_colors = None
+            cls._instance.points_kdtree = None
+            cls._instance.original_coords = None
+            
+        return cls._instance
+    
     #Function to load the point cloud, store it's data and draw it using openGL, optimized version
-    def pointcloud_load_optimized(self,path, point_size, sparsity_value):
+    def pointcloud_load_optimized(self,path, point_size, sparsity_value,points_percentage,z_height_cut_off):
         
         start_time = time.time()
         print("Started loading point cloud.."),
         global use_pickled_kdtree,point_cloud_name,point_cloud_point_size, save_json
-        points_percentage=context.scene.points_percentage
-        z_height_cut_off=context.scene.z_height_cut_off
-        
+
         base_file_name = os.path.basename(path)
         point_cloud_name = base_file_name
         directory_path = os.path.dirname(path)
@@ -147,9 +143,7 @@ class GetPointCloudData:
         #Save json file of point cloud data
         if save_json:
             export_as_json(reduced_points,reduced_colors,JSON_data_path,point_cloud_name,points_percentage)
-            #this function creates more read able json files, but is slower 
-            #save_as_json(self.point_coords,self.point_colors)
-
+  
         #Function to save KD-tree with pickle and gzip
         def save_kdtree_pickle_gzip(file_path, kdtree):
             with gzip.open(file_path, 'wb', compresslevel=1) as f:  # compresslevel from 1-9, low-high compression
@@ -276,11 +270,10 @@ def save_kdtree_to_file(file_path, kdtree):
     with open(file_path, 'w') as file:
         json.dump(kdtree_data, file)
         
-
-        if context.object:
+        if bpy.context.object:
             bpy.ops.object.select_all(action='DESELECT')
-            context.view_layer.objects.active = context.object
-            context.object.select_set(True)
+            bpy.context.view_layer.objects.active = bpy.context.object
+            bpy.context.object.select_set(True)
             bpy.ops.object.delete()
     print("saved kdtree to",file_path)
 
@@ -292,8 +285,9 @@ def store_object_state(obj):
     obj.select_set(True)  #Select the current object
 
     set_origin_to_geometry_center(obj)
-
-    save_shape_as_image(obj)
+    save_shape_checkbox = bpy.context.scene.save_shape
+    if(save_shape_checkbox):
+        save_shape_as_image(obj)
     #Storing object state
     obj_state = {
         'name': obj.name,
@@ -303,9 +297,9 @@ def store_object_state(obj):
         'mesh': obj.data.copy() 
     }
     
-    undo_stack.append(obj_state) 
+    #undo_stack.append(obj_state) 
     #Clear the redo stack
-    redo_stack.clear()     
+    #redo_stack.clear()     
 
 #Set origin to geometry center based on object type   
 def set_origin_to_geometry_center(obj):
@@ -479,4 +473,8 @@ def uninstall_libraries(library_list):
             subprocess.check_call([sys.executable, '-m', 'pip', 'uninstall', library])
             print(f"Successfully uninstall {library}")
         except subprocess.CalledProcessError as e:
-            print(f"Error uninstall {library}: {e}")                    
+            print(f"Error uninstall {library}: {e}")   
+                             
+#module imports
+from .math_utils import get_average_intensity
+from .shape_recognition_utils import save_shape_as_image
