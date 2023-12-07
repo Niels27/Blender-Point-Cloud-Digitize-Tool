@@ -99,22 +99,22 @@ def create_fixed_triangle(coords, side_length=0.5):
      #Convert coords to numpy array for efficient operations
     coords_np = np.array(coords)
 
-    #Reference vertex (first vertex)
+    #Reference vertex 
     vertex1 = coords_np[0]
 
     #Normal vector of the plane defined by the original triangle
     normal_vector = np.cross(coords_np[1] - vertex1, coords_np[2] - vertex1)
     normal_vector = normal_vector / np.linalg.norm(normal_vector)  #Normalize the normal vector
 
-    #Direction vector for the second vertex
+    #direction vector for the second vertex
     dir_vector = coords_np[1] - vertex1
     dir_vector = dir_vector / np.linalg.norm(dir_vector) * side_length
 
     #Calculate the position of the second vertex
     vertex2 = vertex1 + dir_vector
 
-    #Direction vector for the third vertex
-    #Use cross product to find a perpendicular vector in the plane
+ 
+    #use cross product to find a perpendicular vector 
     perp_vector = np.cross(normal_vector, dir_vector)
     perp_vector = perp_vector / np.linalg.norm(perp_vector) * side_length
 
@@ -214,10 +214,10 @@ def create_fixed_length_segments(points, segment_length=1.0):
         segment_distance = segment_vector.length
         total_distance += segment_distance
 
-        # Normalize the segment vector
+        #Normalize the segment vector
         segment_vector.normalize()
 
-        # Generate points at fixed intervals between start and end
+        #Generate points at fixed intervals between start and end
         while segment_distance > segment_length:
             new_point = start_point + segment_vector * segment_length
             extended_points.append(new_point)
@@ -229,7 +229,7 @@ def create_fixed_length_segments(points, segment_length=1.0):
         if segment_distance > 0:
             extended_points.append(end_point)
 
-    # Adjust the last segment if it's not a full segment
+    #Adjust the last segment if it's not a full segment
     if total_distance % segment_length != 0:
         extended_points[-1] = extended_points[-2] + segment_vector * (total_distance % segment_length)
 
@@ -317,14 +317,11 @@ def create_mesh_with_material(obj_name, shape_coords, marking_color, transparenc
     obj.data.materials.append(mat)
     return obj
 
+#Define a function to draw a line between two points with optional snapping
 def draw_line(self, context, event,point_coords, point_colors, points_kdtree):
-
     if not hasattr(self, 'click_counter'):
         self.click_counter = 0
 
-    marking_color = context.scene.marking_color
-    width = context.scene.fatline_width
-    intensity_threshold = context.scene.intensity_threshold
     snap_to_road_mark = context.scene.snap_to_road_mark
     extra_z_height = context.scene.extra_z_height
     
@@ -332,20 +329,56 @@ def draw_line(self, context, event,point_coords, point_colors, points_kdtree):
     region = context.region
     region_3d = context.space_data.region_3d
     
-    #Convert the mouse position to a 3D location for the end point of the line
+    # Convert the mouse position to a 3D location for the end point of the line
     coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-    coord_3d_end.z += extra_z_height  #Add to the z dimension to prevent clipping
+    coord_3d_end.z += extra_z_height
 
     self.click_counter += 1
-    
-    # Update the line if snapping is enabled
+
     if snap_to_road_mark and self.click_counter > 1:
-        coord_3d_start = self.prev_end_point
-        new_start, new_end = snap_line_to_road_mark(self, context, coord_3d_start, coord_3d_end,point_coords, point_colors, points_kdtree)
-        create_rectangle_line_object(new_start, new_end)  # Redraw line with snapped coordinates
+        # Calculate the direction vector
+        direction_vector = (self.prev_end_point - coord_3d_end).normalized()
+        search_range = 0.5
+
+        # Find the center of the cluster near the second click point
+        cluster_center = find_cluster_center(context, coord_3d_end, direction_vector, search_range,point_coords, point_colors, points_kdtree)
+        if cluster_center is not None:
+            coord_3d_end = cluster_center  # Move the second click point to the cluster center
+
+    # Create or update the line
+    if self.prev_end_point is not None:
+        create_rectangle_line_object(self.prev_end_point, coord_3d_end)
 
     self.prev_end_point = coord_3d_end  # Update the previous end point
 
+#function to determine the center of a cluster of points
+def find_cluster_center(context, click_point, direction, range,point_coords, point_colors, points_kdtree):
+    intensity_threshold = context.scene.intensity_threshold
+   
+    # Define the search bounds and find points within the bounds
+    upper_bound = click_point + direction * range
+    lower_bound = click_point - direction * range
+    indices = points_kdtree.query_ball_point([upper_bound, lower_bound], range)
+    indices = [i for sublist in indices for i in sublist]
+    potential_points = np.array(point_coords)[indices]
+    high_intensity_points = potential_points[np.average(point_colors[indices], axis=1) > intensity_threshold]
+
+    if len(high_intensity_points) > 0:
+        # Find the outer points
+        min_x = np.min(high_intensity_points[:, 0])
+        max_x = np.max(high_intensity_points[:, 0])
+        min_y = np.min(high_intensity_points[:, 1])
+        max_y = np.max(high_intensity_points[:, 1])
+
+        # Calculate the center of these extremal points
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        center_z = np.mean(high_intensity_points[:, 2])  # Average Z value
+  
+        mark_point(Vector((center_x, center_y, center_z)), "cluster_center")
+        return Vector((center_x, center_y, center_z))
+
+    return None
 
 #Function to create a colored, resizable line object on top of the line      
 def create_rectangle_line_object(start, end):
@@ -405,7 +438,7 @@ def create_rectangle_line_object(start, end):
     material.use_nodes = True
     material.blend_method = 'BLEND'  #Use alpha blend mode
 
-    #Set the Principled BSDF shader's alpha value
+    #Set the Principled BSDF shader alpha value
     principled_bsdf = next(node for node in material.node_tree.nodes if node.type == 'BSDF_PRINCIPLED')
     principled_bsdf.inputs['Alpha'].default_value = transparency
     
@@ -548,7 +581,7 @@ def create_triangle_outline(vertices):
     return obj
 
 #function to correct the first or second click to the nearest road mark    
-def snap_line_to_road_mark(self, context, first_click_point, last_click_point,point_coords, point_colors, points_kdtree,region_radius=50):
+def snap_line_to_road_mark(self, context, first_click_point, last_click_point,point_coords, point_colors, points_kdtree,region_radius=10):
     
     intensity_threshold = context.scene.intensity_threshold       
 

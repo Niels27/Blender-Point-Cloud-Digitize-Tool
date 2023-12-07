@@ -297,7 +297,6 @@ def store_object_state(obj):
         'mesh': obj.data.copy() 
     }
     
-
 #Set origin to geometry center based on object type   
 def set_origin_to_geometry_center(obj):
     if obj.type == 'MESH':

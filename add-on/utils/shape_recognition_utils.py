@@ -168,8 +168,7 @@ def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
             shape = "square"
         else:
             shape = "rectangle"
-
-        
+ 
     #Print the detected shape
     print(f"Detected shape: {shape}")
 

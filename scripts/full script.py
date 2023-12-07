@@ -61,7 +61,6 @@ from bpy_extras import view3d_utils
 import numpy as np
 import open3d as o3d
 import bgl
-#import blf
 import time
 import math
 import laspy as lp
@@ -76,16 +75,15 @@ import gzip
 import pandas as pd
 import geopandas as gpd
 from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
-#import copy
 from collections import deque
 from multiprocessing import Pool
-#from concurrent.futures import ProcessPoolExecutor,ThreadPoolExecutor
-#from functools import partial
 from joblib import dump, load 
 import json
 import cv2
 from sklearn.cluster import DBSCAN 
-#from scipy.interpolate import UnivariateSpline, make_interp_spline,CubicSpline
+from sklearn.linear_model import RANSACRegressor
+from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 from shapely.geometry import Point
 
 #Global variables 
@@ -1546,7 +1544,6 @@ class SnappingLineMarkOperator(bpy.types.Operator):
         return {'CANCELLED'}
     
 def draw_line(self, context, event):
-
     if not hasattr(self, 'click_counter'):
         self.click_counter = 0
 
@@ -1557,80 +1554,82 @@ def draw_line(self, context, event):
     region = context.region
     region_3d = context.space_data.region_3d
     
-    #Convert the mouse position to a 3D location for the end point of the line
+    # Convert the mouse position to a 3D location for the end point of the line
     coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
-    coord_3d_end.z += extra_z_height  #Add to the z dimension to prevent clipping
+    coord_3d_end.z += extra_z_height
 
-    #Check if the current click is on a white road mark
-    on_white_end = is_click_on_white(self, context, coord_3d_end)
     self.click_counter += 1
-    print(f"Mouseclick {self.click_counter} is {'on' if on_white_end else 'not on'} a white road mark.")
-    # Update the line if snapping is enabled
-    
+
+    # Check if the current click is on a white road mark
+    on_white = is_click_on_white(self, context, coord_3d_end)
+
     if snap_to_road_mark and self.click_counter > 1:
-        coord_3d_start = self.prev_end_point
-        new_start, new_end = snap_line_to_road_mark(self, context, coord_3d_start, coord_3d_end)
-        create_rectangle_line_object(new_start, new_end)  # Redraw line with snapped coordinates
+        # Calculate the direction vector
+        direction_vector = (self.prev_end_point - coord_3d_end).normalized()
+        search_range = 0.5
+
+        # Find the center of the cluster near the second click point
+        cluster_center = find_cluster_center(context, coord_3d_end, direction_vector, search_range)
+        if cluster_center is not None:
+            coord_3d_end = cluster_center  # Move the second click point to the cluster center
+
+    # Create or update the line
+    if self.prev_end_point is not None:
+        create_rectangle_line_object(self.prev_end_point, coord_3d_end)
 
     self.prev_end_point = coord_3d_end  # Update the previous end point
 
 
-#function to correct the first or second click to the nearest road mark    
-def snap_line_to_road_mark(self, context, first_click_point, last_click_point,region_radius=2):
-    
+def find_cluster_center(context, click_point, direction, range):
     intensity_threshold = context.scene.intensity_threshold
-    global point_coords, point_colors, points_kdtree        
+    global point_coords, point_colors, points_kdtree
 
-    #Get the direction vector between the two clicks and its perpendicular
-    direction = (last_click_point - first_click_point).normalized()
-    perp_direction = direction.cross(Vector((0, 0, 1))).normalized()
+    # Define the search bounds and find points within the bounds
+    upper_bound = click_point + direction * range
+    lower_bound = click_point - direction * range
+    indices = points_kdtree.query_ball_point([upper_bound, lower_bound], range)
+    indices = [i for sublist in indices for i in sublist]
+    potential_points = np.array(point_coords)[indices]
+    high_intensity_points = potential_points[np.average(point_colors[indices], axis=1) > intensity_threshold]
 
-    #Find the index of the last click point in the point cloud
-    _, idx = points_kdtree.query([last_click_point], k=1)
-         
-    def region_grow(start_point, radius, threshold):
-        checked_indices = set()
-        indices_to_check = [start_point]
-        region_points = []
-        while indices_to_check:
-            current_index = indices_to_check.pop()
-            if current_index not in checked_indices:
-                checked_indices.add(current_index)
-                point_intensity = np.average(point_colors[current_index]) 
-                if point_intensity > threshold:
-                    region_points.append(point_coords[current_index])
-                    _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
-                    indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
-        return region_points
-    
-    def find_outward_points(region_points, direction):
-        #Project all points to the direction vector and find the most outward points
-        projections = [np.dot(point, direction) for point in region_points]
-        min_proj_index = np.argmin(projections)
-        max_proj_index = np.argmax(projections)
-        return region_points[min_proj_index], region_points[max_proj_index]
-        
-    def snap_last_point(_first_click_point, _last_click_point):
-        
-        #Perform region growing on the last click point
-        region = region_grow(idx[0], region_radius, intensity_threshold)
-        if region:
-            edge1, edge2 = find_outward_points(region, perp_direction)
+    if len(high_intensity_points) > 0:
+        # Find the extremal points
+        min_x = np.min(high_intensity_points[:, 0])
+        max_x = np.max(high_intensity_points[:, 0])
+        min_y = np.min(high_intensity_points[:, 1])
+        max_y = np.max(high_intensity_points[:, 1])
 
-            #Calculate the new click point based on the edges
-            _last_click_point = (edge1 + edge2) * 0.5
-            _last_click_point = Vector((_last_click_point[0], _last_click_point[1], _last_click_point[2]))
-        else:
-            print("No points found to project.")
-        mark_point(_first_click_point,"_first_click_point",0.02)
-        mark_point(_last_click_point,"_last_click_point",0.02)
-        return _first_click_point, _last_click_point
-    
+        # Calculate the center of these extremal points
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        center_z = np.mean(high_intensity_points[:, 2])  # Average Z value
+  
+        mark_point(Vector((center_x, center_y, center_z)))
+        return Vector((center_x, center_y, center_z))
 
-    new_first_click_point, new_last_click_point = snap_last_point(first_click_point, last_click_point)
-    print("Snapped to road mark")
-    return new_first_click_point, new_last_click_point
-    
+    return None
+  
+# Finds a high-intensity points cluster near the click point and calculate its center.  
+def find_cluster_points(context, click_point, direction, range):
+    intensity_threshold = context.scene.intensity_threshold
+    global point_coords, point_colors, points_kdtree
+
+    # Define the search bounds
+    upper_bound = click_point + direction * range
+    lower_bound = click_point - direction * range
+
+    # Find all points within the search bounds
+    indices = points_kdtree.query_ball_point([upper_bound, lower_bound], range)
+    indices = [i for sublist in indices for i in sublist]  # Flatten the list
+    potential_points = np.array(point_coords)[indices]
+    high_intensity_points = potential_points[np.average(point_colors[indices], axis=1) > intensity_threshold]
+
+    # Limit to a certain number of points for performance
+    if len(high_intensity_points) > 0:
+        return high_intensity_points[:500]
+
+    return None
+
 
 #Custom operator for the pop-up dialog
 class CorrectionPopUpOperator(bpy.types.Operator):
@@ -2461,6 +2460,10 @@ def mark_point(point, name="point", size=0.05):
     show_dots=context.scene.show_dots
     
     if show_dots:
+        # Check if point has only 2 components (X and Y) and add a Z component of 0
+        if len(point) == 2:
+            point = (point[0], point[1], 0)
+            
         #Create a cube to mark the point
         bpy.ops.mesh.primitive_cube_add(size=size, location=point)
         marker = bpy.context.active_object

@@ -16,9 +16,6 @@ import mathutils
 import pandas as pd
 import geopandas as gpd
 
-
-from ..utils.math_utils import region_growing
-
 #global variables
 last_processed_index = 0 #Global variable to keep track of the last processed index, for numbering road marks
 
@@ -92,12 +89,11 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
         obj.data.materials.append(material)
 
         self.prev_end_point = coord_3d_end
-          #After the object is created, store it 
+        #After the object is created, store it 
         store_object_state(obj)
         #Create a rectangle object on top of the line
         create_rectangle_line_object(coord_3d_start, coord_3d_end)
         
-
     def cancel(self, context):
         if context.object:
             bpy.ops.object.select_all(action='DESELECT')
@@ -143,7 +139,7 @@ class SimpleMarkOperator(bpy.types.Operator):
             radius = 50
             _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
         
-            rectangle_coords = []
+            region_growth_coords = []
             
             #Get the average intensity of the nearest points
             average_intensity = get_average_intensity(nearest_indices[0],point_colors)
@@ -156,30 +152,14 @@ class SimpleMarkOperator(bpy.types.Operator):
             #Check if the average intensity indicates a road marking (white)
             if average_intensity > intensity_threshold:
                 #Region growing algorithm
-                checked_indices = set()
-                indices_to_check = list(nearest_indices[0])
-                print("Region growing started")
-                while indices_to_check:   
-                    current_index = indices_to_check.pop()
-                    if current_index not in checked_indices:
-                        checked_indices.add(current_index)
-                        intensity = np.average(point_colors[current_index]) #* 255  #grayscale
-                        if intensity>intensity_threshold:
-                            rectangle_coords.append(point_coords[current_index])
-                            _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
-                            indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
-
-                print("Region growing completed", time.time()-start_time)
-                
-            
+                region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, radius, intensity_threshold, region_growth_coords)
             else:
                 print("no road markings found")
                 
-            if rectangle_coords:
+            if region_growth_coords:
                 #Create a single mesh for the combined  rectangles
-                create_shape(rectangle_coords,shape_type="unkown")
+                create_shape(region_growth_coords,shape_type="unkown")
                 
-        
         elif event.type == 'ESC':
             SimpleMarkOperator._is_running = False
             print("Operation was cancelled")
@@ -187,7 +167,6 @@ class SimpleMarkOperator(bpy.types.Operator):
 
         return {'PASS_THROUGH'}
 
-    
     def invoke(self, context, event):
         if SimpleMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
@@ -243,7 +222,7 @@ class ComplexMarkOperator(bpy.types.Operator):
                 radius = 100
                 _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
             
-                rectangle_coords = []
+                region_growth_coords = []
                 
                 #Get the average intensity of the nearest points
                 average_intensity = get_average_intensity(nearest_indices[0],point_colors)
@@ -256,29 +235,15 @@ class ComplexMarkOperator(bpy.types.Operator):
                 #Check if the average intensity indicates a road marking (white)
                 if average_intensity > intensity_threshold:
                     #Region growing algorithm
-                    checked_indices = set()
-                    indices_to_check = list(nearest_indices[0])
-                    print("Region growing started")
-                    while indices_to_check:   
-                        current_index = indices_to_check.pop()
-                        if current_index not in checked_indices:
-                            checked_indices.add(current_index)
-                            intensity = np.average(point_colors[current_index]) #* 255  #grayscale
-                            if intensity>intensity_threshold:
-                                rectangle_coords.append(point_coords[current_index])
-                                _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
-                                indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
-
-                    print("Region growing completed", time.time()-start_time)
-                    
+                    region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, radius, intensity_threshold, region_growth_coords)                    
                 
                 else:
                     print("no road markings found")
                 clicked=False    
                 
-                if rectangle_coords:
+                if region_growth_coords:
                     #Create a single mesh for the combined rectangles
-                    create_dots_shape(rectangle_coords)
+                    create_dots_shape(region_growth_coords)
                       
             elif event.type == 'ESC':
                 ComplexMarkOperator._is_running = False  #Reset the flag when the operator stops
@@ -562,7 +527,7 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
             radius = 50
             _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
         
-            triangle_coords = []
+            region_growth_coords = []
             
             #Get the average intensity of the nearest points
             average_intensity = get_average_intensity(nearest_indices[0],point_colors)
@@ -575,27 +540,13 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
             #Check if the average intensity indicates a road marking (white)
             if average_intensity > intensity_threshold:
                 #Region growing algorithm
-                checked_indices = set()
-                indices_to_check = list(nearest_indices[0])
-                print("Region growing started")
-                while indices_to_check:   
-                    current_index = indices_to_check.pop()
-                    if current_index not in checked_indices:
-                        checked_indices.add(current_index)
-                        intensity = np.average(point_colors[current_index]) #* 255  #grayscale
-                        if intensity>intensity_threshold:
-                            triangle_coords.append(point_coords[current_index])
-                            _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
-                            indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
-
-                print("Region growing completed", time.time()-start_time)
-         
+                region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, radius, intensity_threshold, region_growth_coords)         
             else:
                 print("no road markings found")
                 
-            if triangle_coords:
+            if region_growth_coords:
                 
-                filtered_triangle_coords=filter_noise_with_dbscan(triangle_coords)
+                filtered_triangle_coords=filter_noise_with_dbscan(region_growth_coords)
                 self._processed_indices.update(checked_indices)
                 triangle_vertices = create_flexible_triangle(filtered_triangle_coords)
                 self._triangles.append(triangle_vertices)
@@ -912,7 +863,7 @@ class RectangleMarkOperator(bpy.types.Operator):
             radius = 50
             _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
         
-            rectangle_coords = []
+            region_growth_coords = []
             
             #Get the average intensity of the nearest points
             average_intensity = get_average_intensity(nearest_indices[0],point_colors)
@@ -925,28 +876,14 @@ class RectangleMarkOperator(bpy.types.Operator):
             #Check if the average intensity indicates a road marking (white)
             if average_intensity > intensity_threshold:
                 #Region growing algorithm
-                checked_indices = set()
-                indices_to_check = list(nearest_indices[0])
-                print("Region growing started")
-                while indices_to_check:   
-                    current_index = indices_to_check.pop()
-                    if current_index not in checked_indices:
-                        checked_indices.add(current_index)
-                        intensity = np.average(point_colors[current_index]) #* 255  #grayscale
-                        if intensity>intensity_threshold:
-                            rectangle_coords.append(point_coords[current_index])
-                            _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
-                            indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
-
-                print("Region growing completed", time.time()-start_time)
-                
+                region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, radius, intensity_threshold, region_growth_coords)                
             
             else:
                 print("no road markings found")
                 
-            if rectangle_coords:
+            if region_growth_coords:
                 #Create a single mesh for the combined  rectangles
-                create_shape(rectangle_coords,shape_type="rectangle")
+                create_shape(region_growth_coords,shape_type="rectangle")
                 
         
         elif event.type == 'ESC':
@@ -1014,7 +951,7 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
             radius = 50
             _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
         
-            rectangle_coords = []
+            region_growth_coords = []
             
             #Get the average intensity of the nearest points
             average_intensity = get_average_intensity(nearest_indices[0],point_colors)
@@ -1027,33 +964,18 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
             #Check if the average intensity indicates a road marking (white)
             if average_intensity > intensity_threshold:
                 #Region growing algorithm
-                checked_indices = set()
-                indices_to_check = list(nearest_indices[0])
-                print("Region growing started")
-                while indices_to_check:   
-                    current_index = indices_to_check.pop()
-                    if current_index not in checked_indices:
-                        checked_indices.add(current_index)
-                        intensity = np.average(point_colors[current_index]) #* 255  #grayscale
-                        if intensity>intensity_threshold:
-                            rectangle_coords.append(point_coords[current_index])
-                            _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
-                            indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
-
-                print("Region growing completed", time.time()-start_time)
-         
+                region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, radius, intensity_threshold, region_growth_coords)         
             
             else:
                 print("no road markings found")
-                
-
-            if rectangle_coords:
+            
+            if region_growth_coords:
                 #filters out bad points
                 #filtered_rectangle_coords=filter_noise_with_dbscan(rectangle_coords)
                 self._processed_indices.update(checked_indices)
-                rectangle_vertices = create_flexible_rectangle(rectangle_coords)
+                rectangle_vertices = create_flexible_rectangle(region_growth_coords)
                 self._rectangles.append(rectangle_vertices)
-                create_shape(rectangle_coords, shape_type="rectangle")
+                create_shape(region_growth_coords, shape_type="rectangle")
 
                 if len(self._rectangles) == 2:
                     #center_points= self.find_center_points(self._rectangles[0], self._rectangles[1])
@@ -1230,7 +1152,7 @@ class AutoCurvedLineOperator(bpy.types.Operator):
             
             #Check if the average intensity indicates a road marking (white)
             if average_intensity > intensity_threshold:
-                region_growth_coords = region_growing(point_coords, point_colors, points_kdtree, nearest_indices, radius, intensity_threshold, region_growth_coords)
+                region_growth_coords,checked_indices = region_growing(point_coords, point_colors, points_kdtree, nearest_indices, radius, intensity_threshold, region_growth_coords)
                 
             else:
                 print("no road markings found")
@@ -1272,7 +1194,6 @@ class FixedTriangleMarkOperator(bpy.types.Operator):
         
         if event.type == 'MOUSEMOVE':  
             self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
-
 
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
             if context.area and context.area.type == 'VIEW_3D':
@@ -1345,4 +1266,4 @@ class FixedRectangleMarkOperator(bpy.types.Operator):
 #module imports
 from ..utils.blender_utils import GetPointCloudData, is_mouse_in_3d_view, store_object_state
 from ..utils.digitizing_utils import mark_point, create_shape, create_rectangle_line_object, create_polyline,create_flexible_triangle, create_dots_shape, draw_line, create_flexible_rectangle,create_fixed_square,draw_fixed_triangle
-from ..utils.math_utils import get_average_color, get_average_intensity, filter_noise_with_dbscan, move_triangle_to_line
+from ..utils.math_utils import get_average_color, get_average_intensity, filter_noise_with_dbscan, move_triangle_to_line, region_growing
