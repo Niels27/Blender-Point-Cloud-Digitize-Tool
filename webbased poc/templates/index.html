@@ -1,18 +1,26 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Point Cloud Viewer</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.0.4/pako.min.js"></script>
-    <style>
-        body { margin: 0; }
-        canvas { display: block; }
-    </style>
+  
+    <title>Shapefile Viewer</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" charset="UTF-8">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.6.0/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.6.0/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/shpjs/3.6.2/shp.min.js"></script>
 </head>
 <body>
-    <div id="progress">Loading...</div>
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <div id="map" style="width: 100%; height: 500px;"></div>
+    <script>
+        var map = L.map('map').setView([51.505, -0.09], 13); 
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19
+        }).addTo(map);
+
+        shp("http://localhost:5000/shapefiles/shapefile.zip").then(function(geojson){
+            var layer = L.geoJson(geojson).addTo(map);
+            map.fitBounds(layer.getBounds());
+        });
+    </script>
 </body>
 </html>
