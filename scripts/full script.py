@@ -588,8 +588,8 @@ class SimpleMarkOperator(bpy.types.Operator):
             #Check if the average intensity indicates a road marking (white)
             if average_intensity > intensity_threshold:
                 #if the average intensity is higher than the threshold, bring the threshold closer to the average intensity
-                if(average_intensity-intensity_threshold>10):
-                    intensity_threshold=average_intensity-10 
+                #if(average_intensity-intensity_threshold>50):
+                    #intensity_threshold=average_intensity-50 
                 #Region growing algorithm
                 region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, radius, intensity_threshold, region_growth_coords)
             else:
@@ -677,8 +677,8 @@ class ComplexMarkOperator(bpy.types.Operator):
            #Check if the average intensity indicates a road marking (white)
             if average_intensity > intensity_threshold:
                 #if the average intensity is higher than the threshold, bring the threshold closer to the average intensity
-                if(average_intensity-intensity_threshold>10):
-                    intensity_threshold=average_intensity-10 
+                #if(average_intensity-intensity_threshold>50):
+                    #intensity_threshold=average_intensity-50 
                 #Region growing algorithm
                 region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, radius, intensity_threshold, region_growth_coords)
             else:
@@ -1070,6 +1070,7 @@ class SelectionDetectionOpterator(bpy.types.Operator):
         print("Operator was properly cancelled")  #Debug message
         return {'CANCELLED'}
 
+    
 class AutoTriangleMarkOperator(bpy.types.Operator):
     
     bl_idname = "custom.auto_mark_triangle"
@@ -1241,9 +1242,9 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
                 triangle_vertices = create_flexible_triangle(filtered_points)
                 self._triangles.append(triangle_vertices)
                 self._found_triangles += 1
-                create_shape(filtered_points, shape_type="fixed triangle", vertices=triangle_vertices)
+                create_shape(filtered_points, shape_type="triangle", vertices=triangle_vertices)
                 
-    def interpolate_line(self, start, end, num_points=50):
+    def interpolate_line(self, start, end, num_points=100):
         #Generate points along the line between start and end
         return [start + t * (end - start) for t in np.linspace(0, 1, num_points)]
 
