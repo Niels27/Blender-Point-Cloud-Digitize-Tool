@@ -19,9 +19,15 @@ def save_shape_as_image(obj):
     if not obj:
         raise ValueError(f"Object {obj_name} not found.")
     
-    #Get the directory of the current Blender file
+    # Get the directory of the current Blender file
     blend_file_path = bpy.data.filepath
-    directory = os.path.dirname(blend_file_path)
+   
+    if blend_file_path:
+        directory = os.path.dirname(blend_file_path)
+    else:
+    # Prompt the user to save the file first or set a default directory
+        print("please save blender project first! shape not saved.")
+        return
 
     #Create a folder 'road_mark_images' if it doesn't exist
     images_dir = os.path.join(directory, 'road_mark_images')
