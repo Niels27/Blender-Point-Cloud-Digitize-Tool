@@ -273,6 +273,22 @@ def pointcloud_load_optimized(path, point_size, sparsity_value):
             #Store the draw handler reference in the driver namespace
             bpy.app.driver_namespace['my_draw_handler'] = draw_handler
             
+            #Calculate the bounding box of the point cloud
+            min_coords = np.min(point_coords, axis=0)
+            max_coords = np.max(point_coords, axis=0)
+            bbox_center = (min_coords + max_coords) / 2
+            
+            #Get the active 3D view
+            for area in bpy.context.screen.areas:
+                if area.type == 'VIEW_3D':
+                    break
+                    
+            #Set the view to look at the bounding box center from above at a height of 10 meters
+            view3d = area.spaces[0]
+            view3d.region_3d.view_location = (bbox_center[0], bbox_center[1], 10)  #X, Y, 10 meters height
+            #view3d.region_3d.view_rotation = bpy.context.scene.camera.rotation_euler  #Maintaining the current rotation
+            view3d.region_3d.view_distance = 10  #Distance from the view point
+            
             print("openGL point cloud drawn in:",time.time() - start_time,"using ",points_percentage," percent of points (",len(reduced_points),") points") 
             
         else:
@@ -571,9 +587,7 @@ class SimpleMarkOperator(bpy.types.Operator):
                 
         
         elif event.type == 'ESC':
-            SimpleMarkOperator._is_running = False
-            print("Operation was cancelled")
-            return {'CANCELLED'}  #Stop when ESCAPE is pressed
+            return self.cancel(context)
 
         return {'PASS_THROUGH'}
 
@@ -590,7 +604,7 @@ class SimpleMarkOperator(bpy.types.Operator):
         else:
             return {'CANCELLED'}
 
-    def cancel(self, context):
+    def cancel(self,context):
         SimpleMarkOperator._is_running = False  #Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  #Debug message
         return {'CANCELLED'}
@@ -657,14 +671,13 @@ class ComplexMarkOperator(bpy.types.Operator):
 
                     print("Region growing completed", time.time()-start_time)
                     
-                
                 else:
                     print("no road markings found")
                 clicked=False    
                 
                 if rectangle_coords:
                     #Create a single mesh for the combined rectangles
-                    create_dots_shape(rectangle_coords)
+                    create_dots_shape(rectangle_coords,"rectangle dots shape")
                       
             elif event.type == 'ESC':
                 ComplexMarkOperator._is_running = False  #Reset the flag when the operator stops
@@ -746,12 +759,143 @@ class FindALlRoadMarkingsOperator(bpy.types.Operator):
         start_time = time.time()
         
         for white_object_coords in all_white_object_coords:
-            create_dots_shape(white_object_coords)
+            create_dots_shape(white_object_coords,"auto road mark")
         
         print("rendered shapes in: ", time.time() - start_time)
-        
         return {'FINISHED'}
+
+class CurbDetectionOperator(bpy.types.Operator):
+    bl_idname = "custom.curb_detection_operator"
+    bl_label = "Curb Detection Operator"
+
+    click_count = 0
+    first_click_point = None
+    second_click_point = None
+    _is_running = False  #Class variable to check if the operator is already running
+    
+    def modal(self, context, event):
+        global point_coords, point_colors, points_kdtree
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+            self.click_count += 1
+
+            # Convert the mouse position to 3D space
+            coord_3d = view3d_utils.region_2d_to_location_3d(
+                context.region, context.space_data.region_3d,
+                (event.mouse_region_x, event.mouse_region_y),
+                Vector((0, 0, 0))
+            )
+
+            if self.click_count == 1:
+                self.first_click_point = coord_3d
+                print("first click at", self.first_click_point)
+            else:
+                self.second_click_point = coord_3d
+                print("second click at", self.second_click_point,"starting curb detection between mouseclicks")
+                start_time = time.time()
+                self.detect_curb_points(points_kdtree, self.first_click_point, self.second_click_point)
+                self._is_running = False
+                end_time = time.time()
+                print(f"Detection time: {end_time - start_time} seconds.")
+                # Set the first click point to the second click point for the next detection
+                self.first_click_point = self.second_click_point
+
+        elif event.type in {'RIGHTMOUSE', 'ESC'}:
+            return self.cancel(context)
+
+        return {'PASS_THROUGH'}
+
+    def invoke(self, context, event):
+        self.click_count = 0
+        context.window_manager.modal_handler_add(self)
+        if CurbDetectionOperator._is_running:
+            self.report({'WARNING'}, "Operator is already running")
+            return self.cancel(context)  #Do not run the operator if it's already running
+        self._is_running = True
+        return {'RUNNING_MODAL'}
+
+    def detect_curb_points(self, points_kdtree, first_click_point, second_click_point):
         
+        print("Starting curb detection...")  # Debug
+        curb_points_indices = []
+
+        line_direction = np.array(second_click_point) - np.array(first_click_point)
+        line_length = np.linalg.norm(line_direction)
+        line_direction /= line_length  # Normalize
+        perp_direction = np.array([-line_direction[1], line_direction[0], 0])
+        corridor_width = 0.4
+        num_samples = 100 
+        neighbor_search_distance = 0.2
+
+        print(f"Line Direction: {line_direction}, Perpendicular Direction: {perp_direction}")  # Debug
+
+        for i in range(num_samples):
+            t = i / (num_samples - 1)
+            sample_point = np.array(first_click_point) + t * line_direction * line_length
+            if(i==1 ):
+                mark_point(sample_point, "curb start", 0.1)
+            if(i==num_samples-1 ):
+                mark_point(sample_point, "curb end", 0.1)
+            # Query KDTree for points within the corridor width around the sample point
+            indices = points_kdtree.query_ball_point(sample_point, corridor_width / 2)
+
+            for idx in indices:
+                point = point_coords[idx]
+
+                # Check neighbors to the left and right
+                left_neighbor = points_kdtree.query_ball_point(point - perp_direction * neighbor_search_distance, 0.1)
+                right_neighbor = points_kdtree.query_ball_point(point + perp_direction * neighbor_search_distance, 0.1)
+
+                if not left_neighbor or not right_neighbor:
+                    curb_points_indices.append(idx)
+
+        # Extract unique indices as curb points may be found multiple times
+        unique_indices = list(set(curb_points_indices))
+        curb_points = [point_coords[idx] for idx in unique_indices]
+        
+        # Extract x, y, and z coordinates
+        x_coords = [p[0] for p in curb_points]
+        y_coords = [p[1] for p in curb_points]
+        z_coords = [p[2] for p in curb_points]
+
+        # Calculate the median for each coordinate
+        median_x = np.median(x_coords)
+        median_y = np.median(y_coords)
+        median_z = np.median(z_coords)
+    
+        if curb_points:
+            median_curb_point = Vector((median_x, median_y, median_z))
+            self.draw_curb_line(first_click_point, median_curb_point, second_click_point)
+            
+        print(f"Total unique curb points found: {len(curb_points)}")              
+        create_dots_shape(curb_points,"curb shape",False,True)
+        
+    def draw_curb_line(self, first_click_point, avg_curb_point, second_click_point):
+        # Create a new mesh and object
+        mesh = bpy.data.meshes.new(name="CurbLine")
+        obj = bpy.data.objects.new("CurbLine", mesh)
+
+        # Link the object to the scene
+        bpy.context.collection.objects.link(obj)
+        bpy.context.view_layer.objects.active = obj
+        obj.select_set(True)
+
+        # Create a bmesh, add vertices, and create the edge
+        bm = bmesh.new()
+        v1 = bm.verts.new(first_click_point)
+        v2 = bm.verts.new(avg_curb_point)
+        v3 = bm.verts.new(second_click_point)
+        bm.edges.new((v1, v2))
+        bm.edges.new((v2, v3))
+
+        # Update and free the bmesh
+        bm.to_mesh(mesh)
+        bm.free()
+           
+    def cancel(self,context):
+        CurbDetectionOperator._is_running = False  #Reset the flag when the operator is cancelled
+        print("Operator was properly cancelled")  #Debug message
+        return {'CANCELLED'}   
+     
 #Run the detection logic only within a selection made by the user with 2 mouseclicks   
 class SelectionDetectionOpterator(bpy.types.Operator):
     bl_idname = "view3d.selection_detection"
@@ -860,7 +1004,7 @@ class SelectionDetectionOpterator(bpy.types.Operator):
         print("road marks found: ", white_objects_count)
         #Visualize detected white objects
         for white_object_coords in all_white_object_coords:
-            create_dots_shape(white_object_coords)  
+            create_dots_shape(white_object_coords,"selection road mark")  
             
     #Creates and draws the selection rectangle in the viewport         
     def create_bounding_box(self, min_corner, max_corner):
@@ -2320,84 +2464,75 @@ def create_rectangle_line_object(start, end):
     return obj
 
 #Define a function to create multiple squares on top of detected points, then combines them into one shape
-def create_dots_shape(coords_list):
-    
-    start_time=time.time()
+def create_dots_shape(coords_list,name="Dots Shape", flat_shape=True, filter_points=True):
+    start_time = time.time()
     global shape_counter
     
-    marking_color=context.scene.marking_color
-    transparency = bpy.context.scene.marking_transparency
+    marking_color = context.scene.marking_color
+    transparency = context.scene.marking_transparency
     extra_z_height = context.scene.extra_z_height
-    
-    #Create a new mesh and link it to the scene
+
+    # Create a new mesh and link it to the scene
     mesh = bpy.data.meshes.new("Combined Shape")
-    obj = bpy.data.objects.new("Dots Shape", mesh)
+    obj = bpy.data.objects.new(name, mesh)
     bpy.context.collection.objects.link(obj)
 
     bm = bmesh.new()
 
-    square_size = 0.025  #Size of each square
-    z_offset = extra_z_height  #Offset in Z coordinate
-    max_gap = 10  #Maximum gap size to fill
+    square_size = 0.025  # Size of each square
+    max_gap = 10  # Maximum gap size to fill
 
-    #filters out bad points
-    coords_list = filter_noise_with_dbscan(coords_list)
-    
-    #Sort the coordinates by distance
     coords_list.sort(key=lambda coords: (coords[0]**2 + coords[1]**2 + coords[2]**2)**0.5)
-
-    for i in range(len(coords_list)):
+    
+    if filter_points:
+        #filters out bad points
+        coords_list = filter_noise_with_dbscan(coords_list)
+        
+    for i, coords in enumerate(coords_list):
         if i > 0:
-            #Calculate the distance to the previous point
-            gap = ((coords_list[i][0] - coords_list[i-1][0])**2 +
-                   (coords_list[i][1] - coords_list[i-1][1])**2 +
-                   (coords_list[i][2] - coords_list[i-1][2])**2)**0.5
+            # Calculate the distance to the previous point
+            gap = ((coords[0] - coords_list[i-1][0])**2 +
+                   (coords[1] - coords_list[i-1][1])**2 +
+                   (coords[2] - coords_list[i-1][2])**2)**0.5
             if gap > max_gap:
-                #If the gap is too large, create a new mesh for the previous group of points
+                # If the gap is too large, create a new mesh for the previous group of points
                 bm.to_mesh(mesh)
                 bm.clear()
-                #Update the internal index table of the BMesh
                 bm.verts.ensure_lookup_table()
 
-        #Create a square at the current point with an adjusted Z coordinate
+        z_coord = coords[2] if not flat_shape else extra_z_height
+        # Create a square at the current point
         square_verts = [
-            bm.verts.new(coords_list[i] + (-square_size / 2, -square_size / 2, z_offset)),
-            bm.verts.new(coords_list[i] + (-square_size / 2, square_size / 2, z_offset)),
-            bm.verts.new(coords_list[i] + (square_size / 2, square_size / 2, z_offset)),
-            bm.verts.new(coords_list[i] + (square_size / 2, -square_size / 2, z_offset)),
+            bm.verts.new(Vector((coords[0] - square_size / 2, coords[1] - square_size / 2, z_coord))),
+            bm.verts.new(Vector((coords[0] - square_size / 2, coords[1] + square_size / 2, z_coord))),
+            bm.verts.new(Vector((coords[0] + square_size / 2, coords[1] + square_size / 2, z_coord))),
+            bm.verts.new(Vector((coords[0] + square_size / 2, coords[1] - square_size / 2, z_coord))),
         ]
 
-        #Create a face for the square
         bm.faces.new(square_verts)
 
-    #Create a mesh for the last group of points
+    # Create a mesh for the last group of points
     bm.to_mesh(mesh)
     bm.free()
 
-    #Create a new material for the combined shape
+    # Create and assign the material
     shape_material = bpy.data.materials.new(name="shape material")
     shape_material.diffuse_color = (marking_color[0], marking_color[1], marking_color[2], transparency)
-    #Enable transparency in the material settings
     shape_material.use_nodes = True
     shape_material.blend_method = 'BLEND'
-
-    #Find the Principled BSDF node and set its alpha value
     principled_node = next(n for n in shape_material.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
     principled_node.inputs['Alpha'].default_value = transparency
-    
-    #Assign the material to the object
-    if len(obj.data.materials) > 0:
-        #If the object already has materials, replace the first one with the  material
-        obj.data.materials[0] = shape_material
-    else:
-        #add the material to the object
-        obj.data.materials.append(shape_material)
-        
-    obj.color = marking_color  #Set viewport display color 
-    shape_counter+=1
+    obj.data.materials.append(shape_material)
 
-    #After the object is created, store it 
+    obj.color = marking_color
+    shape_counter += 1
+
+    # Store the object state
     store_object_state(obj)
+
+    print(f"Dots shape created in {time.time() - start_time} seconds.")
+    return obj
+
     
 #Checks whether the mouseclick happened in the viewport or elsewhere    
 def is_mouse_in_3d_view(context, event):
@@ -2864,10 +2999,6 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         layout.prop(scene, "marking_color")
         layout.prop(scene, "marking_transparency")
         layout.prop(scene, "extra_z_height")
-        
-        row = layout.row(align=True)
-        row.operator("view3d.line_drawer", text="Draw Line")
-        row.prop(scene, "fatline_width")
  
         row = layout.row(align=True)
         layout.operator("view3d.mark_fast", text="Simple fill marker")
@@ -2884,10 +3015,14 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         layout.operator("custom.auto_mark_triangle", text="auto triangle marker")
         layout.operator("custom.mark_rectangle", text="rectangle marker")
         layout.operator("custom.auto_mark_rectangle", text="auto rectangle marker")
-        layout.operator("custom.mark_snapping_line", text="snapping line marker") 
+        
         row = layout.row()
         row.prop(scene, "snap_to_road_mark")
-        layout.operator("custom.auto_curved_line", text="auto curved line")  
+        row.prop(scene, "fatline_width")
+        layout.operator("custom.mark_snapping_line", text="line marker") 
+        layout.operator("custom.auto_curved_line", text="auto curved line") 
+        layout.operator("custom.curb_detection_operator", text="curb detection") 
+        
         row = layout.row(align=True)
         row.operator("object.simple_undo", text="Undo")
         row.operator("object.simple_redo", text="Redo")
@@ -2924,17 +3059,18 @@ def register():
     bpy.utils.register_class(AutoRectangleMarkOperator)
     bpy.utils.register_class(AutoCurvedLineOperator)
     bpy.utils.register_class(SnappingLineMarkOperator)
+    bpy.utils.register_class(CurbDetectionOperator)
     bpy.utils.register_class(CorrectionPopUpOperator)
     bpy.utils.register_class(CenterPointCloudOperator)
     bpy.utils.register_class(ExportToShapeFileOperator)
     bpy.utils.register_class(FindALlRoadMarkingsOperator)
     bpy.utils.register_class(OBJECT_OT_simple_undo)
     bpy.utils.register_class(OBJECT_OT_simple_redo)
+    
     bpy.types.Scene.point_size = IntProperty(name="POINT SIZE",
                                       default=1)
     bpy.types.Scene.sparsity_value = IntProperty(name="SPARSITY VALUE",
                                       default=1)
-    
     bpy.types.Scene.intensity_threshold = bpy.props.FloatProperty(
         name="Intensity Threshold",
         description="Minimum intensity threshold",
@@ -2960,12 +3096,11 @@ def register():
         subtype='UNSIGNED' 
     )
     bpy.types.Scene.fatline_width = bpy.props.FloatProperty(
-        name="Width",
+        name="Line width",
         description="Fat Line Width",
         default=0.10,
         min=0.01, max=10,  #min and max width
-        subtype='NONE'  
-        
+        subtype='NONE'     
     )
     bpy.types.Scene.marking_color = bpy.props.FloatVectorProperty(
         name="Marking Color",
@@ -3013,7 +3148,7 @@ def register():
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.z_height_cut_off = bpy.props.FloatProperty(
-        name="max z",
+        name="max height",
         description="height to cut off z",
         default=0.5,
         subtype='UNSIGNED'  
@@ -3024,8 +3159,8 @@ def register():
         default=0.1,
         subtype='UNSIGNED'  
     )
-bpy.types.Scene.snap_to_road_mark= bpy.props.BoolProperty(
-        name="auto snap",
+    bpy.types.Scene.snap_to_road_mark= bpy.props.BoolProperty(
+        name="snap line",
         description="Snaps user drawn shape to roadmark",
         default=True,
         subtype='UNSIGNED'  
@@ -3053,6 +3188,7 @@ def unregister():
     bpy.utils.unregister_class(AutoRectangleMarkOperator) 
     bpy.utils.unregister_class(AutoCurvedLineOperator)
     bpy.utils.unregister_class(SnappingLineMarkOperator)
+    bpy.utils.unregister_class(CurbDetectionOperator)
     
     bpy.utils.unregister_class(CreatePointCloudObjectOperator)
     bpy.utils.unregister_class(CorrectionPopUpOperator)
@@ -3078,7 +3214,7 @@ def unregister():
                  
 if __name__ == "__main__":
     register()
-    
+
     if(context.scene.auto_load):
         bpy.ops.wm.las_auto_open()
         
