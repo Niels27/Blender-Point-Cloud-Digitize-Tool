@@ -329,27 +329,30 @@ def draw_line(self, context, event,point_coords, point_colors, points_kdtree):
     region = context.region
     region_3d = context.space_data.region_3d
     
-    # Convert the mouse position to a 3D location for the end point of the line
+    #Convert the mouse position to a 3D location for the end point of the line
     coord_3d_end = view3d_utils.region_2d_to_location_3d(region, region_3d, (event.mouse_region_x, event.mouse_region_y), Vector((0, 0, 0)))
     coord_3d_end.z += extra_z_height
 
     self.click_counter += 1
 
+    #Check if the current click is on a white road mark
+    on_white = is_click_on_white(self, context, coord_3d_end)
+
     if snap_to_road_mark and self.click_counter > 1:
-        # Calculate the direction vector
+        #Calculate the direction vector
         direction_vector = (self.prev_end_point - coord_3d_end).normalized()
         search_range = 0.5
 
-        # Find the center of the cluster near the second click point
+        #Find the center of the cluster near the second click point
         cluster_center = find_cluster_center(context, coord_3d_end, direction_vector, search_range,point_coords, point_colors, points_kdtree)
         if cluster_center is not None:
-            coord_3d_end = cluster_center  # Move the second click point to the cluster center
+            coord_3d_end = cluster_center  #Move the second click point to the cluster center
 
-    # Create or update the line
+    #Create or update the line
     if self.prev_end_point is not None:
         create_rectangle_line_object(self.prev_end_point, coord_3d_end)
 
-    self.prev_end_point = coord_3d_end  # Update the previous end point
+    self.prev_end_point = coord_3d_end  #Update the previous end point
 
 #function to determine the center of a cluster of points
 def find_cluster_center(context, click_point, direction, range,point_coords, point_colors, points_kdtree):
@@ -451,7 +454,7 @@ def create_rectangle_line_object(start, end):
     return obj
 
 #Define a function to create multiple squares on top of detected points, then combines them into one shape
-def create_dots_shape(coords_list):
+def create_dots_shape(coords_list,name="Dots Shape", filter_points=True):
     
     start_time=time.time()
     global shape_counter
@@ -462,7 +465,7 @@ def create_dots_shape(coords_list):
     
     #Create a new mesh and link it to the scene
     mesh = bpy.data.meshes.new("Combined Shape")
-    obj = bpy.data.objects.new("Dots Shape", mesh)
+    obj = bpy.data.objects.new(name, mesh)
     bpy.context.collection.objects.link(obj)
 
     bm = bmesh.new()
@@ -471,8 +474,9 @@ def create_dots_shape(coords_list):
     z_offset = extra_z_height  #Offset in Z coordinate
     max_gap = 10  #Maximum gap size to fill
 
-    #filters out bad points
-    coords_list = filter_noise_with_dbscan(coords_list)
+    if filter_points:
+        #filters out bad points
+        coords_list = filter_noise_with_dbscan(coords_list)
     
     #Sort the coordinates by distance
     coords_list.sort(key=lambda coords: (coords[0]**2 + coords[1]**2 + coords[2]**2)**0.5)
@@ -530,7 +534,6 @@ def create_dots_shape(coords_list):
     #After the object is created, store it 
     store_object_state(obj)
     
-
 #function to draw tiny marks on a given point
 def mark_point(point, name="point", size=0.05):
     

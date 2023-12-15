@@ -17,24 +17,6 @@ from sklearn.cluster import DBSCAN
 from scipy.interpolate import UnivariateSpline, make_interp_spline, CubicSpline
 
 
-def get_average_intensity(indices, point_colors):
-    #If indices is a NumPy array with more than one dimension flatten it
-    if isinstance(indices, np.ndarray) and indices.ndim > 1:
-        indices = indices.flatten()
-
-    #if indices is a scalar, convert it to a list with a single element
-    if np.isscalar(indices):
-        indices = [indices]
-
-    total_intensity = 0.0
-    point_amount = len(indices)
-    for index in indices:
-        intensity = np.average(point_colors[index])
-        total_intensity += intensity
-
-    return total_intensity / point_amount
-
-
 # function to filter bad points
 def filter_noise_with_dbscan(coords_list, eps=0.04, min_samples=20):
     #DBSCAN clustering
@@ -60,17 +42,36 @@ def filter_noise_with_dbscan(coords_list, eps=0.04, min_samples=20):
 
     return filtered_coords
 
+def get_average_intensity(indices, point_colors):
+    #if indices is a NumPy array with more than one dimension flatten it
+    if isinstance(indices, np.ndarray) and indices.ndim > 1:
+        indices = indices.flatten()
 
-def get_average_color(indices, point_colors):
-    point_amount = len(indices)
+    #if indices is a scalar, convert it to a list with a single element
+    if np.isscalar(indices):
+        indices = [indices]
+
+    #gather all intensity values
+    intensities = [np.average(point_colors[index]) for index in indices]
+
+    #Sort the intensities
+    sorted_intensities = sorted(intensities)
+
+    #discard the lowest 50% of values
+    upper_half = sorted_intensities[len(sorted_intensities) // 2:]
+
+    #return the average intensity of the upper half
+    return sum(upper_half) / len(upper_half) if upper_half else 0
+
+def get_average_color(indices,point_colors):
+    point_amount=len(indices)
     average_color = np.zeros(3, dtype=float)
     for index in indices:
-        color = point_colors[index]
+        color = point_colors[index] #* 255  #rgb
         average_color += color
     average_color /= point_amount
     return average_color
-
-
+ 
 # triangle mark functions
 def move_triangle_to_line(triangle, line_start, line_end):
     # Convert inputs to numpy arrays for easier calculations
@@ -97,7 +98,6 @@ def move_triangle_to_line(triangle, line_start, line_end):
 
     return triangle_np.tolist()
 
-
 def find_base_vertices(triangle, line_start, line_end):
     distances = [
         np.linalg.norm(closest_point(vertex, line_start, line_end) - vertex)
@@ -105,7 +105,6 @@ def find_base_vertices(triangle, line_start, line_end):
     ]
     sorted_indices = np.argsort(distances)
     return sorted_indices[:2]  # Indices of the two closest vertices
-
 
 def find_closest_vertex_to_line(triangle, line_start, line_end):
     min_distance = float("inf")
@@ -119,7 +118,6 @@ def find_closest_vertex_to_line(triangle, line_start, line_end):
             closest_vertex_index = i
 
     return closest_vertex_index
-
 
 def find_base_vertex(triangle, line_start, line_end):
     min_distance = float("inf")
@@ -136,7 +134,6 @@ def find_base_vertex(triangle, line_start, line_end):
 
     return base_vertex, base_index
 
-
 def closest_point(point, line_start, line_end):
     line_vec = line_end - line_start
     point_vec = point - line_start
@@ -151,6 +148,52 @@ def closest_point(point, line_start, line_end):
     nearest = line_vec * t
     return line_start + nearest
 
+def find_cluster_center(context, click_point, direction, range,point_coords, point_colors, points_kdtree):
+    intensity_threshold = context.scene.intensity_threshold
+ 
+    #Define the search bounds and find points within the bounds
+    upper_bound = click_point + direction * range
+    lower_bound = click_point - direction * range
+    indices = points_kdtree.query_ball_point([upper_bound, lower_bound], range)
+    indices = [i for sublist in indices for i in sublist]
+    potential_points = np.array(point_coords)[indices]
+    high_intensity_points = potential_points[np.average(point_colors[indices], axis=1) > intensity_threshold]
+
+    if len(high_intensity_points) > 0:
+        #Find the extremal points
+        min_x = np.min(high_intensity_points[:, 0])
+        max_x = np.max(high_intensity_points[:, 0])
+        min_y = np.min(high_intensity_points[:, 1])
+        max_y = np.max(high_intensity_points[:, 1])
+
+        #Calculate the center of these extremal points
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        center_z = np.mean(high_intensity_points[:, 2])  #Average Z value
+  
+        mark_point(Vector((center_x, center_y, center_z)))
+        return Vector((center_x, center_y, center_z))
+
+    return None
+  
+#Finds a high-intensity points cluster near the click point and calculate its center.  
+def find_cluster_points(context, click_point, direction, range,point_coords,point_colors,points_kdtree):
+    intensity_threshold = context.scene.intensity_threshold
+    #Define the search bounds
+    upper_bound = click_point + direction * range
+    lower_bound = click_point - direction * range
+
+    #Find all points within the search bounds
+    indices = points_kdtree.query_ball_point([upper_bound, lower_bound], range)
+    indices = [i for sublist in indices for i in sublist]  #Flatten the list
+    potential_points = np.array(point_coords)[indices]
+    high_intensity_points = potential_points[np.average(point_colors[indices], axis=1) > intensity_threshold]
+
+    #Limit to a certain number of points for performance
+    if len(high_intensity_points) > 0:
+        return high_intensity_points[:500]
+
+    return None
 
 # function to calculate middle points of a line
 def create_middle_points(coords_list, num_segments=10):
@@ -205,7 +248,6 @@ def create_middle_points(coords_list, num_segments=10):
 
     return middle_points
 
-
 #Find the four corner points of the rectangle formed by the given points.
 def find_rectangle_corners(points):
     # Extract X and Y coordinates
@@ -228,7 +270,6 @@ def find_rectangle_corners(points):
         mark_point(corner, "corner")
     return corners
 
-
 #Calculate the middle line of the rectangle formed by the corners.
 def calculate_middle_line(corners):
     # Calculate the midpoints of opposite sides
@@ -241,7 +282,6 @@ def calculate_middle_line(corners):
     mark_point(midpoint_left, "midpoint1")
     mark_point(midpoint_right, "midpoint2")
     return midpoint_left, midpoint_right
-
 
 # snap the drawn line to the center line of the rectangle formed by the cluster.
 def snap_line_to_center_line(first_click_point, second_click_point, cluster):
@@ -264,7 +304,6 @@ def snap_line_to_center_line(first_click_point, second_click_point, cluster):
 
     return new_first_click_point, new_second_click_point
 
-
 def region_growing(
     point_coords,
     point_colors,
@@ -280,10 +319,15 @@ def region_growing(
     indices_to_check = list(nearest_indices[0])
     print("Region growing started")
     while indices_to_check:
+        current_time = time.time()
+        #Check if 30 seconds have passed
+        if current_time - start_time > 15:
+            print("Region growing stopped due to time limit.")
+            break
         current_index = indices_to_check.pop()
         if current_index not in checked_indices:
             checked_indices.add(current_index)
-            intensity = np.average(point_colors[current_index])  # * 255  #grayscale
+            intensity = np.average(point_colors[current_index])  #* 255  #grayscale
             if intensity > intensity_threshold:
                 region_growth_coords.append(point_coords[current_index])
                 _, neighbor_indices = points_kdtree.query(
@@ -300,3 +344,4 @@ def region_growing(
 
 # module imports
 from ..utils.digitizing_utils import mark_point
+

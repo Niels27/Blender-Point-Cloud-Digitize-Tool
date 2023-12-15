@@ -4,7 +4,7 @@ bl_info = {
     "name": "Point Cloud Digitizing Tool",
     "description": "A custom add-on for digitizing road marks in point clouds",
     "author": "Niels van der Wal",
-    "version": (1, 0, 0),
+    "version": (1, 1, 1),
     "blender": (3, 4, 0),  # Replace with the minimum Blender version your script is compatible with
     "location": "View3D > Tools > Digitize Tool",
     "category": "3D View"
@@ -40,15 +40,16 @@ print(sys.version)
 
 #module imports
 from .operators.utility_operators import *
-from .operators.drawing_operators import *
+from .operators.digitizing_operators import *
 from . UI.panel import DIGITIZE_PT_Panel
 
+            
 #Register the operators and panel
 def register():
     bpy.utils.register_class(LAS_OT_OpenOperator)
     bpy.utils.register_class(CreatePointCloudObjectOperator)
     bpy.utils.register_class(DrawStraightFatLineOperator)
-    bpy.utils.register_class(RemoveAllObjectsOperator)
+    bpy.utils.register_class(RemoveAllMarkingsOperator)
     bpy.utils.register_class(DIGITIZE_PT_Panel)
     bpy.utils.register_class(RemovePointCloudOperator)
     bpy.utils.register_class(GetPointsInfoOperator)
@@ -63,16 +64,17 @@ def register():
     bpy.utils.register_class(AutoRectangleMarkOperator)
     bpy.utils.register_class(AutoCurvedLineOperator)
     bpy.utils.register_class(SnappingLineMarkOperator)
-    bpy.utils.register_class(CorrectionPopUpOperator)
+    bpy.utils.register_class(CurbDetectionOperator)
+    bpy.utils.register_class(PopUpOperator)
     bpy.utils.register_class(CenterPointCloudOperator)
     bpy.utils.register_class(ExportToShapeFileOperator)
     bpy.utils.register_class(FindALlRoadMarkingsOperator)
 
+    
     bpy.types.Scene.point_size = IntProperty(name="POINT SIZE",
                                       default=1)
     bpy.types.Scene.sparsity_value = IntProperty(name="SPARSITY VALUE",
                                       default=1)
-    
     bpy.types.Scene.intensity_threshold = bpy.props.FloatProperty(
         name="Intensity Threshold",
         description="Minimum intensity threshold",
@@ -84,26 +86,25 @@ def register():
     bpy.types.Scene.markings_threshold = bpy.props.IntProperty(
         name="Max:",
         description="Maximum markings amount for auto marker",
-        default=30,  #Default value
+        default=5,  #Default value
         min=1, #Minimum value
         max=100, #Max value  
         subtype='UNSIGNED' 
     )
     bpy.types.Scene.points_percentage = bpy.props.IntProperty(
-        name="Points percentage:",
+        name="Points %:",
         description="Percentage of points rendered",
-        default=50,  #Default value
+        default=30,  #Default value
         min=1, #Minimum value
         max=100, #Max value  
         subtype='UNSIGNED' 
     )
     bpy.types.Scene.fatline_width = bpy.props.FloatProperty(
-        name="Width",
+        name="Line width",
         description="Fat Line Width",
         default=0.10,
         min=0.01, max=10,  #min and max width
-        subtype='NONE'  
-        
+        subtype='NONE'     
     )
     bpy.types.Scene.marking_color = bpy.props.FloatVectorProperty(
         name="Marking Color",
@@ -123,7 +124,7 @@ def register():
         size=4
     )
     bpy.types.Scene.marking_transparency = bpy.props.FloatProperty(
-        name="Marking Transparency",
+        name="Transparency",
         description="Set the transparency for the marking (0.0 fully transparent, 1.0 fully opaque)",
         default=1,  #Default transparency is 100%
         min=0.0, max=1.0  #Transparency can range from 0.0 to 1.0
@@ -134,37 +135,37 @@ def register():
 )
     bpy.types.Scene.save_shape = bpy.props.BoolProperty(
         name="Save Shapes",
-        description="Toggle saving shapes",
+        description="Saves an image after marking a shape",
         default=False,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.auto_load = bpy.props.BoolProperty(
         name="Auto load auto.laz",
-        description="Toggle auto loading auto.laz",
+        description="Auto loads auto.laz on every exectuion",
         default=False,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.show_dots = bpy.props.BoolProperty(
         name="Show Dots",
-        description="Toggle showing dots",
+        description="Toggle showing feedback dots",
         default=False,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.z_height_cut_off = bpy.props.FloatProperty(
-        name="max z",
-        description="height to cut off z",
+        name="Max height",
+        description="Height to cut off from ground level",
         default=0.5,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.extra_z_height = bpy.props.FloatProperty(
-        name="marking z",
-        description="extra height of all objects",
-        default=0.1,
+        name="Marking Height",
+        description="Extra height of all markings compared to the ground level",
+        default=0.05,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.snap_to_road_mark= bpy.props.BoolProperty(
-        name="auto snap",
-        description="Snaps user drawn shape to roadmark",
+        name="Snap line",
+        description="Snaps the line to nearby roadmark",
         default=True,
         subtype='UNSIGNED'  
     )
@@ -173,7 +174,7 @@ def unregister():
     
     bpy.utils.unregister_class(LAS_OT_OpenOperator) 
     bpy.utils.unregister_class(DrawStraightFatLineOperator)
-    bpy.utils.unregister_class(RemoveAllObjectsOperator)
+    bpy.utils.unregister_class(RemoveAllMarkingsOperator)
     bpy.utils.unregister_class(DIGITIZE_PT_Panel)
     bpy.utils.unregister_class(RemovePointCloudOperator)
     bpy.utils.unregister_class(GetPointsInfoOperator)
@@ -190,9 +191,10 @@ def unregister():
     bpy.utils.unregister_class(AutoRectangleMarkOperator) 
     bpy.utils.unregister_class(AutoCurvedLineOperator)
     bpy.utils.unregister_class(SnappingLineMarkOperator)
+    bpy.utils.unregister_class(CurbDetectionOperator)
     
     bpy.utils.unregister_class(CreatePointCloudObjectOperator)
-    bpy.utils.unregister_class(CorrectionPopUpOperator)
+    bpy.utils.unregister_class(PopUpOperator)
     bpy.utils.unregister_class(CenterPointCloudOperator)
     bpy.utils.unregister_class(ExportToShapeFileOperator)
     
@@ -209,6 +211,7 @@ def unregister():
     del bpy.types.Scene.z_height_cut_off
     del bpy.types.Scene.extra_z_height
     del bpy.types.Scene.points_percentage
+    
                  
 if __name__ == "__main__":
     register()

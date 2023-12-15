@@ -28,7 +28,6 @@ import json
 from shapely.geometry import Point
 
 #global variables
-use_pickled_kdtree=True
 save_json=False
 point_cloud_name="Point cloud"
 point_cloud_point_size=1
@@ -51,12 +50,19 @@ class GetPointCloudData:
         
         start_time = time.time()
         print("Started loading point cloud.."),
-        global use_pickled_kdtree,point_cloud_name,point_cloud_point_size, save_json
+        global point_cloud_name,point_cloud_point_size, save_json
 
         base_file_name = os.path.basename(path)
         point_cloud_name = base_file_name
         directory_path = os.path.dirname(path)
         blend_file_path = bpy.data.filepath
+                
+        if blend_file_path:
+            directory = os.path.dirname(blend_file_path)
+        else:
+        # Prompt the user to save the file first 
+            print("please save blender project first!")
+            return
         directory = os.path.dirname(blend_file_path)
         JSON_data_path = os.path.join(directory, "JSON files")
         shapefiles_data_path = os.path.join(directory, "shapefiles")
@@ -152,7 +158,7 @@ class GetPointCloudData:
         def load_kdtree_pickle_gzip(file_path):
             with gzip.open(file_path, 'rb') as f:
                 return pickle.load(f)  
-
+        use_pickled_kdtree=True
         if use_pickled_kdtree:
             #KDTree handling
             kdtree_pickle_path = os.path.join(stored_data_path, file_name_kdtree_pickle)
@@ -316,6 +322,29 @@ def set_origin_to_geometry_center(obj):
             if hasattr(obj.data, "update"):
                 obj.data.update()
 
+def set_view_to_top(context):
+    #Find the first 3D View
+    for area in context.screen.areas:
+        if area.type == 'VIEW_3D':
+            #Get the 3D View
+            space_data = area.spaces.active
+
+            #Set the view to top (negative Z axis)
+            #space_data.region_3d.view_rotation = (1, 0, 0, 0)
+            #space_data.region_3d.view_location = (0, 0, 0)  
+            #space_data.region_3d.view_distance = 20  
+            
+            #Get the current rotation in Euler angles
+            current_euler = space_data.region_3d.view_rotation.to_euler()
+
+            #Set the Z-axis rotation to 0, retaining X and Y rotations
+            new_euler = mathutils.Euler((math.radians(0), 0, current_euler.z), 'XYZ')
+            space_data.region_3d.view_rotation = new_euler.to_quaternion()
+            
+            #Update the view
+            area.tag_redraw()
+            break
+   
 #Clears the viewport and deletes the draw handler
 def redraw_viewport():
     
@@ -340,8 +369,11 @@ def redraw_viewport():
     print("viewport redrawn")
     
 #function to check if a mouseclick is on a white object
-def is_click_on_white(self, context, location, points_kdtree,point_colors,neighbors=5):
-    
+def is_click_on_white(self, context, location, neighbors=6):
+    pointcloud_data = GetPointCloudData()
+    point_coords = pointcloud_data.point_coords
+    point_colors = pointcloud_data.point_colors
+    points_kdtree=  pointcloud_data.points_kdtree
     intensity_threshold = context.scene.intensity_threshold
 
     #Define the number of nearest neighbors to search for
@@ -360,7 +392,7 @@ def is_click_on_white(self, context, location, points_kdtree,point_colors,neighb
     else:
         print("Intensity threshold not met")
         return False
-
+   
 def export_as_shapefile(points,points_percentage=100,epsg_value=28992):
     
     global point_cloud_name
@@ -416,36 +448,6 @@ def export_as_json(point_coords,point_colors,JSON_data_path,point_cloud_name,poi
 
     print("Combined JSON file compressed and saved at: ", JSON_data_path, "in: ", time.time() - start_time, "seconds")
              
-def dv_points_reader(filepath):
-    data = pd.read_csv(filepath)
-    x_coord = np.asarray(data['x'])
-    y_coord = np.asarray(data['y'])
-    z_coord = np.asarray(data['z'])
-    indices = np.asarray(data['index'])
-
-    points_coord = np.vstack((x_coord, y_coord, z_coord)).T
-
-    points_coord_avg = np.mean(points_coord, axis=0)
-    points_coord = points_coord - points_coord_avg
-
-    return points_coord, indices, points_coord_avg
-
-def dv_shapefile_reader(filepath, index, avg_shift, coord_z):
-
-    gdf = gpd.read_file(filepath)
-    gdf["Index_"] = gdf["Index_"].astype(int)
-
-    selected_geometries = gdf[gdf['Index_'] == index]['geometry']
-
-    line_coordinates = list(selected_geometries[index].coords)
-
-    first_point = line_coordinates[0]
-    second_point = line_coordinates[1]
-    line_start = np.array([first_point[0] - avg_shift[0], first_point[1] - avg_shift[1], coord_z])
-    line_end = np.array([second_point[0] - avg_shift[0], second_point[1] - avg_shift[1], coord_z])
-
-    return line_start, line_end 
-
 #installs libraries from a list using pip
 def install_libraries(library_list):
     for library in library_list:

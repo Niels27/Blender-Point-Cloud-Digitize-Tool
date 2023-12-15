@@ -15,46 +15,55 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         scene = context.scene
         
         layout.operator("wm.las_open", text="Import Point Cloud")
-        layout.operator("custom.export_to_shapefile", text="export to shapefile")  
-        layout.prop(scene, "points_percentage")
-        layout.prop(scene, "z_height_cut_off")
+        layout.operator("custom.export_to_shapefile", text="Export Shapefile")  
+        row = layout.row(align=True)
+        row.prop(scene, "points_percentage")
+        row.prop(scene, "z_height_cut_off")
         layout.operator("custom.center_pointcloud", text="Center Point Cloud")
-        layout.operator("custom.create_point_cloud_object", text="Create Point Cloud object")
-        layout.operator("custom.remove_point_cloud", text="Remove point cloud")
-        layout.operator("custom.remove_all_markings", text="Remove All markings")
+        row = layout.row(align=True)
+        row.operator("custom.create_point_cloud_object", text="Create Point Cloud object")
+        row.operator("custom.remove_point_cloud", text="Remove point cloud")
         
         row = layout.row(align=True)
-        layout.operator("view3d.select_points", text="Get point color & intensity")
+        row.operator("view3d.select_points", text="Click info")
+        row.operator("custom.remove_all_markings", text="Remove all markings")
         layout.prop(scene, "intensity_threshold")
         
-        row = layout.row()
         layout.prop(scene, "marking_color")
-        layout.prop(scene, "marking_transparency")
-        layout.prop(scene, "extra_z_height")
+        row = layout.row(align=True)
+        row.prop(scene, "extra_z_height")
+        row.prop(scene, "marking_transparency")
+       
+ 
+        row_text = self.layout.row(align=True)
+        row_text.label(text="                                     Markers")
         
         row = layout.row(align=True)
-        row.operator("view3d.line_drawer", text="Draw Line")
-        row.prop(scene, "fatline_width")
- 
-        row = layout.row(align=True)
-        layout.operator("view3d.mark_fast", text="Simple fill marker")
-        layout.operator("view3d.mark_complex", text="Complex fill marker")
-        layout.operator("view3d.selection_detection", text="Selection fill Marker")
+        row.operator("view3d.mark_fast", text="Simple marker")
+        row.operator("view3d.mark_complex", text="Complex marker")
+        layout.operator("view3d.selection_detection", text="Selection Marker")
         row = layout.row()
         row.operator("custom.find_all_road_marks", text="Auto Mark")
         row.prop(scene, "markings_threshold")
         
-        layout.operator("custom.mark_fixed_triangle", text="fixed triangle marker")
-        layout.operator("custom.mark_fixed_rectangle", text="fixed rectangle marker")
-       
-        layout.operator("custom.mark_triangle", text="triangle marker")
-        layout.operator("custom.auto_mark_triangle", text="auto triangle marker")
-        layout.operator("custom.mark_rectangle", text="rectangle marker")
-        layout.operator("custom.auto_mark_rectangle", text="auto rectangle marker")
-        layout.operator("custom.mark_snapping_line", text="snapping line marker") 
+        row = layout.row(align=True)
+        row.operator("custom.mark_fixed_triangle", text="Fixed triangle")
+        row.operator("custom.mark_fixed_rectangle", text="Fixed rectangle")
+        row = layout.row(align=True)
+        row.operator("custom.mark_triangle", text="Triangles marker")
+        row.operator("custom.auto_mark_triangle", text="Auto triangles marker")
+        row = layout.row(align=True)
+        row.operator("custom.mark_rectangle", text="Rectangles marker")
+        row.operator("custom.auto_mark_rectangle", text="Auto rectangles marker")
+        
         row = layout.row()
         row.prop(scene, "snap_to_road_mark")
-        layout.operator("custom.auto_curved_line", text="auto curved line")  
+        row.prop(scene, "fatline_width")
+        row = layout.row()
+        row.operator("custom.mark_snapping_line", text="Line marker") 
+        row.operator("custom.auto_curved_line", text="Auto line marker") 
+        layout.operator("custom.curb_detection_operator", text="Curb marker") 
+      
         row = layout.row()
         row.prop(scene, "save_shape") 
         row = layout.row()
@@ -64,4 +73,5 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
          #Dummy space
         for _ in range(5): 
             layout.label(text="")
+            
             

@@ -26,7 +26,7 @@ class LAS_OT_OpenOperator(bpy.types.Operator):
     
     bl_idname = "wm.las_open"
     bl_label = "Open LAS/LAZ File"
-
+    bl_description = "Import a LAS/LAZ file"
     filepath: bpy.props.StringProperty(subtype="FILE_PATH")
     
     def execute(self, context):
@@ -47,11 +47,13 @@ class LAS_OT_OpenOperator(bpy.types.Operator):
         return {'RUNNING_MODAL'}
     
 #Operator to remove all drawn markings from the scene collection
-class RemoveAllObjectsOperator(bpy.types.Operator):
+class RemoveAllMarkingsOperator(bpy.types.Operator):
     bl_idname = "custom.remove_all_markings"
     bl_label = "Remove All Lines"
-
+    bl_description = "Removes all markings from the scene"
+    
     def execute(self, context):
+        global shape_counter
         bpy.ops.object.select_all(action='DESELECT')
         bpy.ops.object.select_by_type(type='CURVE')
         for obj in bpy.context.scene.objects:
@@ -59,14 +61,15 @@ class RemoveAllObjectsOperator(bpy.types.Operator):
             bpy.data.objects.remove(obj)
         bpy.ops.object.delete()
         print("All markings cleared")
+        shape_counter = 1
         return {'FINISHED'}
     
 class RemovePointCloudOperator(bpy.types.Operator):
-    """Remove the point cloud."""
 
     bl_idname = "custom.remove_point_cloud"
     bl_label = "Remove Point Cloud"
-
+    bl_description = "Stops rendering OpenGL point cloud"
+    
     def execute(self, context):
         
         #set the rendering of the openGL point cloud to off
@@ -80,18 +83,19 @@ class RemovePointCloudOperator(bpy.types.Operator):
       
         return {'FINISHED'}
  
-
 #Prints the point cloud coordinates and the average color & intensity around mouse click        
 class GetPointsInfoOperator(bpy.types.Operator):
     bl_idname = "view3d.select_points"
     bl_label = "Get Points information"
-
+    bl_description= "Get point info around mouse click such as coordinates, color and intensity"
+    
     def modal(self, context, event):
         
-        #access singleton of point cloud data with updated values
+        set_view_to_top(context)
         pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
         point_colors = pointcloud_data.point_colors
-        points_kdtree = pointcloud_data.points_kdtree
+        points_kdtree=  pointcloud_data.points_kdtree
         
         if event.type == 'MOUSEMOVE':  
             self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
@@ -111,7 +115,7 @@ class GetPointsInfoOperator(bpy.types.Operator):
                 z = location.z
 
                 #Perform nearest-neighbor search
-                radius=5
+                radius=6
                 _, nearest_indices = points_kdtree.query([location], k=radius)
                 nearest_colors = [point_colors[i] for i in nearest_indices[0]]
 
@@ -119,13 +123,14 @@ class GetPointsInfoOperator(bpy.types.Operator):
                 #Calculate the average color
                 average_color = np.mean(nearest_colors, axis=0)
                 
-                clicked_on_white = "Clicked on roadmark" if is_click_on_white(self, context, location,points_kdtree,point_colors) else "No roadmark detected"
+                clicked_on_white = "Clicked on roadmark" if is_click_on_white(self, context, location) else "No roadmark detected"
                     
-                print("clicked on x,y,z: ",x,y,z,"Average Color:", average_color,"Average intensity: ",average_intensity,clicked_on_white)
+                print("clicked on x,y,z: ",x,y,z,"Average intensity: ",average_intensity,clicked_on_white,"Average Color:", average_color,)
             else:
                 return {'PASS_THROUGH'}
             
         elif event.type == 'ESC':
+
             return {'CANCELLED'}  #Stop the operator when ESCAPE is pressed
 
         return {'PASS_THROUGH'}
@@ -135,20 +140,20 @@ class GetPointsInfoOperator(bpy.types.Operator):
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         else:
-            return {'CANCELLED'}
-
+            return {'CANCELLED'}    
+       
 #operator to center the point cloud in the viewport
 class CenterPointCloudOperator(bpy.types.Operator):
     bl_idname = "custom.center_pointcloud"
     bl_label = "Center the Point Cloud in Viewport"
-
+    bl_description = "Center the point cloud in the viewport"
+    
     def execute(self, context):
        
-        #access singleton of point cloud data with updated values
         pointcloud_data = GetPointCloudData()
         point_coords = pointcloud_data.point_coords
-    
-        #calculate the bounding box of the point cloud
+
+        #Calculate the bounding box of the point cloud
         min_coords = np.min(point_coords, axis=0)
         max_coords = np.max(point_coords, axis=0)
         bbox_center = (min_coords + max_coords) / 2
@@ -161,11 +166,12 @@ class CenterPointCloudOperator(bpy.types.Operator):
             self.report({'WARNING'}, "No 3D View found")
             return {'CANCELLED'}
 
-        #Set the view to look at the bounding box center from above at a height of 10 meters
+        viewport_height=20
+        #Set the view to look at the bounding box center from above at a height of x meters
         view3d = area.spaces[0]
-        view3d.region_3d.view_location = (bbox_center[0], bbox_center[1], 10)  #X, Y, 10 meters height
+        view3d.region_3d.view_location = (bbox_center[0], bbox_center[1], 10) 
         #view3d.region_3d.view_rotation = bpy.context.scene.camera.rotation_euler  #Maintaining the current rotation
-        view3d.region_3d.view_distance = 10  #Distance from the view point
+        view3d.region_3d.view_distance = viewport_height  #Distance from the view point
 
         return {'FINISHED'}
 
@@ -177,21 +183,20 @@ class ExportToShapeFileOperator(bpy.types.Operator):
 
     def execute(self, context):
         
-        #access singleton of point cloud data with updated values
         pointcloud_data = GetPointCloudData()
         point_coords = pointcloud_data.point_coords
-        
         points_percentage=context.scene.points_percentage
         #Call the function to export the point cloud data to a shapefile
         export_as_shapefile(point_coords,points_percentage)
 
         #Return {'FINISHED'} to indicate that the operation was successful
         return {'FINISHED'}
-
+    
 class CreatePointCloudObjectOperator(bpy.types.Operator):
     
     bl_idname = "custom.create_point_cloud_object"
     bl_label = "Create point cloud object"
+    bl_description= "Create a point cloud object from the loaded point cloud"
     
     global point_cloud_point_size, collection_name
 
@@ -274,21 +279,19 @@ class CreatePointCloudObjectOperator(bpy.types.Operator):
         return {'FINISHED'}
 
 #Custom operator for the pop-up dialog
-class CorrectionPopUpOperator(bpy.types.Operator):
+class PopUpOperator(bpy.types.Operator):
     bl_idname = "wm.correction_pop_up"
     bl_label = "Confirm correction pop up"
-
-    start_point: bpy.props.FloatVectorProperty()
-    end_point: bpy.props.FloatVectorProperty()
-    click_to_correct: bpy.props.StringProperty()
+    bl_description = "Pop up to confirm"
+    
+    average_intensity: bpy.props.FloatProperty()
     
     action: bpy.props.EnumProperty(
         items=[
-            ('DRAW', "Draw Line", "Draw the line anyway"),
-            ('CORRECT', "Correct Line", "Try to correct the line"),
-            ('CANCEL', "Cancel", "Cancel the drawing")
+            ('CONTINUE', "Yes", "Continue"),
+            ('STOP', "Stop", "No"),
         ],
-        default='DRAW',
+        default='STOP',
     )
     #Define the custom draw method
     def draw(self, context):
@@ -296,7 +299,7 @@ class CorrectionPopUpOperator(bpy.types.Operator):
         col = layout.column()
         
         #Add custom buttons to the UI
-        col.label(text=f"{self.click_to_correct} Click(s) might be incorrect")
+        col.label(text="No road marks found. Try with lower threshold?")
         col.label(text="Choose an action:")
         col.separator()
         
@@ -304,22 +307,16 @@ class CorrectionPopUpOperator(bpy.types.Operator):
         layout.props_enum(self, "action")
         
     def execute(self, context):
-        #Access the stored data to perform the correction
-        coord_3d_start = Vector(self.start_point)
-        coord_3d_end = Vector(self.end_point)
-        click_to_correct = self.click_to_correct
-        
-        #print("User chose to", "draw" if self.action == 'DRAW' else "correct")
-        #Based on the user's choice, either draw or initiate a correction process
+
+        #Based on the user's choice, perform the action
         context.scene.user_input_result = self.action
        
-        if self.action == 'CORRECT':
-            '''coord_3d_start, coord_3d_end = snap_to_road_mark(self,context, coord_3d_start, coord_3d_end, click_to_correct)
-            create_rectangle_line_object(coord_3d_start, coord_3d_end)'''
-            print("Corrected line drawing")
-        
-        elif self.action == ('CANCEL'):
-            print("Canceled line drawing")
+        if self.action == 'CONTINUE':
+           old_threshold=context.scene.intensity_threshold
+           context.scene.intensity_threshold=self.average_intensity-5 #lower the threshold to the average intensity around the mouseclick - 5
+           print("lowered intensity threshold from: ",old_threshold,"to: ",self.average_intensity," please try again")
+
+        elif self.action == 'STOP':
             return {'CANCELLED'}
         
         return {'FINISHED'}
@@ -327,8 +324,8 @@ class CorrectionPopUpOperator(bpy.types.Operator):
     def invoke(self, context, event):
         wm = context.window_manager
         return wm.invoke_props_dialog(self)
-    
+ 
     
 #module imports
-from ..utils.blender_utils import GetPointCloudData, is_mouse_in_3d_view, redraw_viewport, export_as_shapefile, is_click_on_white
+from ..utils.blender_utils import GetPointCloudData, is_mouse_in_3d_view, redraw_viewport, export_as_shapefile, is_click_on_white,set_view_to_top
 from ..utils.math_utils import get_average_intensity
