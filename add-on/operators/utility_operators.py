@@ -22,6 +22,7 @@ point_cloud_point_size =  1 #The size of the points in the point cloud
 undo_stack = [] #Keeps track of all objects created/removed for undo functions
 redo_stack = []#Keeps track of all objects created/removed for redo functions
 
+#Operator to import las/laz files                         
 class LAS_OT_OpenOperator(bpy.types.Operator):
     
     bl_idname = "wm.las_open"
@@ -63,7 +64,8 @@ class RemoveAllMarkingsOperator(bpy.types.Operator):
         print("All markings cleared")
         shape_counter = 1
         return {'FINISHED'}
-    
+
+#Operator to remove the point cloud     
 class RemovePointCloudOperator(bpy.types.Operator):
 
     bl_idname = "custom.remove_point_cloud"
@@ -83,7 +85,7 @@ class RemovePointCloudOperator(bpy.types.Operator):
       
         return {'FINISHED'}
  
-#Prints the point cloud coordinates and the average color & intensity around mouse click        
+#Operator to print the point cloud coordinates and the average color & intensity around mouse click        
 class GetPointsInfoOperator(bpy.types.Operator):
     bl_idname = "view3d.select_points"
     bl_label = "Get Points information"
@@ -103,6 +105,7 @@ class GetPointsInfoOperator(bpy.types.Operator):
 
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
             if context.area and context.area.type == 'VIEW_3D':
+                
                 #Get the mouse coordinates
                 x, y = event.mouse_region_x, event.mouse_region_y
                 #Convert 2D mouse coordinates to 3D view coordinates
@@ -142,7 +145,7 @@ class GetPointsInfoOperator(bpy.types.Operator):
         else:
             return {'CANCELLED'}    
        
-#operator to center the point cloud in the viewport
+#Operator to center the point cloud in the viewport
 class CenterPointCloudOperator(bpy.types.Operator):
     bl_idname = "custom.center_pointcloud"
     bl_label = "Center the Point Cloud in Viewport"
@@ -175,8 +178,9 @@ class CenterPointCloudOperator(bpy.types.Operator):
 
         return {'FINISHED'}
 
-#exports point cloud as shp file
+#Operator to exports point cloud as shp file
 class ExportToShapeFileOperator(bpy.types.Operator):
+    
     bl_idname = "custom.export_to_shapefile"
     bl_label = "Export to Shapefile"
     bl_description = "Export the current point cloud to a shapefile"
@@ -186,12 +190,10 @@ class ExportToShapeFileOperator(bpy.types.Operator):
         pointcloud_data = GetPointCloudData()
         point_coords = pointcloud_data.point_coords
         points_percentage=context.scene.points_percentage
-        #Call the function to export the point cloud data to a shapefile
         export_as_shapefile(point_coords,points_percentage)
-
-        #Return {'FINISHED'} to indicate that the operation was successful
         return {'FINISHED'}
-    
+
+#Operator to create a point cloud object from the loaded point cloud    
 class CreatePointCloudObjectOperator(bpy.types.Operator):
     
     bl_idname = "custom.create_point_cloud_object"
@@ -265,8 +267,6 @@ class CreatePointCloudObjectOperator(bpy.types.Operator):
       else:
         mesh.materials.append(material)
         
-      #After the object is created, store it 
-      #store_object_state(obj)
       return obj 
    
     def execute(self, context):
@@ -278,20 +278,21 @@ class CreatePointCloudObjectOperator(bpy.types.Operator):
         print("--- %s seconds ---" % (time.time() - start_time))
         return {'FINISHED'}
 
-#Custom operator for the pop-up dialog
+#Operator for the pop-up dialog
 class PopUpOperator(bpy.types.Operator):
     bl_idname = "wm.correction_pop_up"
     bl_label = "Confirm correction pop up"
     bl_description = "Pop up to confirm"
     
     average_intensity: bpy.props.FloatProperty()
+    adjust_action: bpy.props.StringProperty()
     
     action: bpy.props.EnumProperty(
         items=[
-            ('CONTINUE', "Yes", "Continue"),
-            ('STOP', "Stop", "No"),
+            ('CONTINUE', "Yes", "Yes"),
+            ('STOP', "No", "No"),
         ],
-        default='STOP',
+        default='CONTINUE',
     )
     #Define the custom draw method
     def draw(self, context):
@@ -299,7 +300,10 @@ class PopUpOperator(bpy.types.Operator):
         col = layout.column()
         
         #Add custom buttons to the UI
-        col.label(text="No road marks found. Try with lower threshold?")
+        if self.adjust_action=='LOWER':
+            col.label(text="No road marks found. Try with lower threshold?")
+        elif self.adjust_action=='HIGHER':
+            col.label(text="Threshold might be too low, Try with higher threshold?")
         col.label(text="Choose an action:")
         col.separator()
         
@@ -312,10 +316,14 @@ class PopUpOperator(bpy.types.Operator):
         context.scene.user_input_result = self.action
        
         if self.action == 'CONTINUE':
-           old_threshold=context.scene.intensity_threshold
-           context.scene.intensity_threshold=self.average_intensity-5 #lower the threshold to the average intensity around the mouseclick - 5
-           print("lowered intensity threshold from: ",old_threshold,"to: ",self.average_intensity," please try again")
-
+           if self.adjust_action=='LOWER':
+               old_threshold=context.scene.intensity_threshold
+               context.scene.intensity_threshold=self.average_intensity-20 #lower the threshold to the average intensity around the mouseclick
+               print("changed intensity threshold from: ",old_threshold,"to: ",self.average_intensity," please try again")
+           elif self.adjust_action=='HIGHER':
+               old_threshold=context.scene.intensity_threshold
+               context.scene.intensity_threshold=self.average_intensity-30 #higher the threshold to the average intensity around the mouseclick 
+               print("changed intensity threshold from: ",old_threshold,"to: ",self.average_intensity," please try again")
         elif self.action == 'STOP':
             return {'CANCELLED'}
         
@@ -324,7 +332,7 @@ class PopUpOperator(bpy.types.Operator):
     def invoke(self, context, event):
         wm = context.window_manager
         return wm.invoke_props_dialog(self)
- 
+
     
 #module imports
 from ..utils.blender_utils import GetPointCloudData, is_mouse_in_3d_view, redraw_viewport, export_as_shapefile, is_click_on_white,set_view_to_top

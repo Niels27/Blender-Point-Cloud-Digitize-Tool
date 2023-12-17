@@ -20,20 +20,7 @@ import geopandas as gpd
 #global variables
 shape_counter=1 #Keeps track of amount of shapes drawn, used to number them
 
-def move_blender_triangle_objects(new_vertices, line_start, line_end):
-    for obj in bpy.data.objects:
-        if "Triangle Shape" in obj.name and obj.type == 'MESH':
-            if len(obj.data.vertices) >= 3:
-                
-                current_triangle = [obj.data.vertices[i].co for i in range(3)]
-                moved_triangle = move_triangle_to_line(current_triangle, line_start, line_end)
-
-                #Update the vertices of the mesh
-                for i, vertex in enumerate(obj.data.vertices[:3]):
-                    vertex.co = moved_triangle[i]
-            else:
-                print(f"Object '{obj.name}' does not have enough vertices")
-                                    
+#Function to create a flexible triangle shape out of coordinates                                    
 def create_flexible_triangle(coords):
 
     #Convert coords to numpy array for efficient operations
@@ -62,6 +49,7 @@ def create_flexible_triangle(coords):
 
     return [vertex1.tolist(), vertex2.tolist(), third_vertex.tolist()]
 
+#Function to create a fixed triangle shape out of coordinates
 def draw_fixed_triangle(context, location, size=1.0):
     
     extra_z_height = context.scene.extra_z_height
@@ -94,7 +82,8 @@ def draw_fixed_triangle(context, location, size=1.0):
     mat = bpy.data.materials.new(name="TriangleMaterial")
     mat.diffuse_color = (1, 0, 0, 1)  #Red color with full opacity
     obj.data.materials.append(mat)   
-    
+
+#Function to create a fixed triangle shape out of coordinates    
 def create_fixed_triangle(coords, side_length=0.5):
      #Convert coords to numpy array for efficient operations
     coords_np = np.array(coords)
@@ -126,6 +115,7 @@ def create_fixed_triangle(coords, side_length=0.5):
 
     return [vertex1.tolist(), vertex2.tolist(), vertex3.tolist()]
 
+#Function to create a flexible rectangle shape out of coordinates
 def create_flexible_rectangle(coords):
     
     hull = ConvexHull(coords)
@@ -137,6 +127,7 @@ def create_flexible_rectangle(coords):
     west = min(vertices, key=lambda p: p[0])
     return [north, east, south, west]
 
+#Function to create a fixed rectangle shape at a location
 def create_fixed_square(context, location, size=1.0):
     #Create new mesh and object
     mesh = bpy.data.meshes.new('FixedSquare')
@@ -172,8 +163,9 @@ def create_fixed_square(context, location, size=1.0):
     mat = bpy.data.materials.new(name="SquareMaterial")
     mat.diffuse_color = (1, 0, 0, 1)  #Red color with full opacity
     obj.data.materials.append(mat)
-      
-def create_polyline(name, points, width=0.01, color=(1, 0, 0, 1)):
+
+#Function to create a polyline going trough given points      
+def create_polyline(points,name='Poly Line', width=0.01, color=(1, 0, 0, 1)):
     #Create a new curve data object
     curve_data = bpy.data.curves.new(name, type='CURVE')
     curve_data.dimensions = '3D'
@@ -198,9 +190,9 @@ def create_polyline(name, points, width=0.01, color=(1, 0, 0, 1)):
     mat = bpy.data.materials.new(name + "_Mat")
     mat.diffuse_color = color
     curve_obj.data.materials.append(mat)
-    store_object_state(curve_obj)
     return curve_obj
 
+#Function to create segments of a given size out of points
 def create_fixed_length_segments(points, segment_length=1.0):
     # function generates points on a polyline with fixed segment lengths
     extended_points = [Vector(points[0])]  # Start with the first point
@@ -235,7 +227,7 @@ def create_fixed_length_segments(points, segment_length=1.0):
 
     return extended_points, total_distance, segment_count + 1  # Include the last partial segment
 
-#Define a function to create a single mesh for combined rectangles
+#Function to create different shapes out of points
 def create_shape(coords_list, shape_type,vertices=None):
     
     start_time = time.time()
@@ -277,7 +269,7 @@ def create_shape(coords_list, shape_type,vertices=None):
         print(f"Total line length: {total_length:.2f} meters")
         print(f"Segmented lines drawn: {segments}")
 
-        obj=create_polyline("Poly Line", middle_points, width=line_width, color=(marking_color[0], marking_color[1], marking_color[2], transparency))
+        obj=create_polyline(middle_points,  width=line_width, color=(marking_color[0], marking_color[1], marking_color[2], transparency))
    
     else:
         print("Drawing unkown Shape")
@@ -285,10 +277,9 @@ def create_shape(coords_list, shape_type,vertices=None):
             "Unkown Shape", coords_list,
             marking_color, transparency)
         
-
-    store_object_state(obj)
     print(f"Rendered {shape_type} shape in: {time.time() - start_time:.2f} seconds")
-  
+
+#Function to create a mesh object
 def create_mesh_with_material(obj_name, shape_coords, marking_color, transparency):
     
     extra_z_height = bpy.context.scene.extra_z_height
@@ -317,7 +308,7 @@ def create_mesh_with_material(obj_name, shape_coords, marking_color, transparenc
     obj.data.materials.append(mat)
     return obj
 
-#Define a function to draw a line between two points with optional snapping
+#Function to draw a line between two points with optional snapping
 def draw_line(self, context, event,point_coords, point_colors, points_kdtree):
     if not hasattr(self, 'click_counter'):
         self.click_counter = 0
@@ -354,7 +345,7 @@ def draw_line(self, context, event,point_coords, point_colors, points_kdtree):
 
     self.prev_end_point = coord_3d_end  #Update the previous end point
 
-#function to determine the center of a cluster of points
+#Function to determine the center of a cluster of points
 def find_cluster_center(context, click_point, direction, range,point_coords, point_colors, points_kdtree):
     intensity_threshold = context.scene.intensity_threshold
    
@@ -383,7 +374,7 @@ def find_cluster_center(context, click_point, direction, range,point_coords, poi
 
     return None
 
-#Function to create a colored, resizable line object on top of the line      
+#Function to create a colored, resizable line shape between 2 points 
 def create_rectangle_line_object(start, end):
     
     context = bpy.context
@@ -448,12 +439,9 @@ def create_rectangle_line_object(start, end):
     #Assign the material to the object
     obj.data.materials.append(material)
 
-    #After the object is created, store it 
-    store_object_state(obj)
-
     return obj
 
-#Define a function to create multiple squares on top of detected points, then combines them into one shape
+#Function to create multiple squares on top of detected points, then combines them into one shape
 def create_dots_shape(coords_list,name="Dots Shape", filter_points=True):
     
     start_time=time.time()
@@ -530,11 +518,8 @@ def create_dots_shape(coords_list,name="Dots Shape", filter_points=True):
         
     obj.color = marking_color  #Set viewport display color 
     shape_counter+=1
-
-    #After the object is created, store it 
-    store_object_state(obj)
     
-#function to draw tiny marks on a given point
+#Function to draw tiny marks on a given point
 def mark_point(point, name="point", size=0.05):
     
     show_dots=bpy.context.scene.show_dots
@@ -556,8 +541,7 @@ def mark_point(point, name="point", size=0.05):
         else:
             marker.data.materials.append(mat)
 
-        store_object_state(marker)
-
+#Function to create a triangle outline
 def create_triangle_outline(vertices):
     #Create a new mesh and object for the triangle outline
     mesh = bpy.data.meshes.new(name="TriangleOutline")
@@ -579,11 +563,9 @@ def create_triangle_outline(vertices):
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     
-    store_object_state(obj)
-    
     return obj
 
-#function to correct the first or second click to the nearest road mark    
+#Function to find nearby road marks and then snap the line, made out of 2 click points, to it
 def snap_line_to_road_mark(self, context, first_click_point, last_click_point,point_coords, point_colors, points_kdtree,region_radius=10):
     
     intensity_threshold = context.scene.intensity_threshold       
@@ -609,16 +591,17 @@ def snap_line_to_road_mark(self, context, first_click_point, last_click_point,po
                     _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
                     indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
         for point in region_points: 
-            mark_point(point,"region_point",0.02)
+            mark_point(point,"region_point",0.02) #visualize the search area
         return region_points
     
+    #Function to find the most outward points of a region
     def find_outward_points(region_points, direction):
         #Project all points to the direction vector and find the most outward points
         projections = [np.dot(point, direction) for point in region_points]
         min_proj_index = np.argmin(projections)
         max_proj_index = np.argmax(projections)
         return region_points[min_proj_index], region_points[max_proj_index]
-        
+    #Function to snap the last click point to a road mark    
     def snap_last_point(_first_click_point, _last_click_point):
         
         #Perform region growing on the last click point
@@ -635,10 +618,10 @@ def snap_line_to_road_mark(self, context, first_click_point, last_click_point,po
         mark_point(_last_click_point,"_last_click_point",0.02)
         return _first_click_point, _last_click_point
     
-
     new_first_click_point, new_last_click_point = snap_last_point(first_click_point, last_click_point)
     print("Snapped to road mark")
     return new_first_click_point, new_last_click_point
+
 
 #module imports
 from ..utils.blender_utils import store_object_state, is_click_on_white

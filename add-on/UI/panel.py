@@ -63,7 +63,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row.operator("custom.mark_snapping_line", text="Line marker") 
         row.operator("custom.auto_curved_line", text="Auto line marker") 
         layout.operator("custom.curb_detection_operator", text="Curb marker") 
-      
+        
         row = layout.row()
         row.prop(scene, "save_shape") 
         row = layout.row()
@@ -72,6 +72,6 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         
          #Dummy space
         for _ in range(5): 
-            layout.label(text="")
+            layout.label(text="")   
             
             

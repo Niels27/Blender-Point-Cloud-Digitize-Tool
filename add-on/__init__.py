@@ -4,8 +4,8 @@ bl_info = {
     "name": "Point Cloud Digitizing Tool",
     "description": "A custom add-on for digitizing road marks in point clouds",
     "author": "Niels van der Wal",
-    "version": (1, 1, 1),
-    "blender": (3, 4, 0),  # Replace with the minimum Blender version your script is compatible with
+    "version": (1, 1, 2),
+    "blender": (3, 4, 0),  
     "location": "View3D > Tools > Digitize Tool",
     "category": "3D View"
 }
@@ -47,6 +47,7 @@ from . UI.panel import DIGITIZE_PT_Panel
 #Register the operators and panel
 def register():
     bpy.utils.register_class(LAS_OT_OpenOperator)
+    bpy.utils.register_class(LAS_OT_AutoOpenOperator)
     bpy.utils.register_class(CreatePointCloudObjectOperator)
     bpy.utils.register_class(DrawStraightFatLineOperator)
     bpy.utils.register_class(RemoveAllMarkingsOperator)
@@ -69,7 +70,7 @@ def register():
     bpy.utils.register_class(CenterPointCloudOperator)
     bpy.utils.register_class(ExportToShapeFileOperator)
     bpy.utils.register_class(FindALlRoadMarkingsOperator)
-
+  
     
     bpy.types.Scene.point_size = IntProperty(name="POINT SIZE",
                                       default=1)
@@ -148,7 +149,7 @@ def register():
     bpy.types.Scene.show_dots = bpy.props.BoolProperty(
         name="Show Dots",
         description="Toggle showing feedback dots",
-        default=False,
+        default=True,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.z_height_cut_off = bpy.props.FloatProperty(
@@ -169,10 +170,11 @@ def register():
         default=True,
         subtype='UNSIGNED'  
     )
-                                    
+#Unregister the operators and panel                                    
 def unregister():
     
     bpy.utils.unregister_class(LAS_OT_OpenOperator) 
+    bpy.utils.unregister_class(LAS_OT_AutoOpenOperator)
     bpy.utils.unregister_class(DrawStraightFatLineOperator)
     bpy.utils.unregister_class(RemoveAllMarkingsOperator)
     bpy.utils.unregister_class(DIGITIZE_PT_Panel)
@@ -216,4 +218,5 @@ def unregister():
 if __name__ == "__main__":
     register()
 
+   
         

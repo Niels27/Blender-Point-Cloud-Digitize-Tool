@@ -32,6 +32,7 @@ save_json=False
 point_cloud_name="Point cloud"
 point_cloud_point_size=1
 
+#Singleton class to save point cloud data
 class GetPointCloudData:
     _instance = None
     
@@ -50,13 +51,12 @@ class GetPointCloudData:
         
         start_time = time.time()
         print("Started loading point cloud.."),
-        global point_cloud_name,point_cloud_point_size, save_json
+        global use_pickled_kdtree,point_cloud_name,point_cloud_point_size, save_json
 
         base_file_name = os.path.basename(path)
         point_cloud_name = base_file_name
         directory_path = os.path.dirname(path)
         blend_file_path = bpy.data.filepath
-                
         if blend_file_path:
             directory = os.path.dirname(blend_file_path)
         else:
@@ -109,11 +109,8 @@ class GetPointCloudData:
                 
             #Shifting coords
             points_a_avg = np.mean(points_a, axis=0)
-            #Creates a cube at the centroid location
-            #bpy.ops.mesh.primitive_cube_add(size=2, enter_editmode=False, align='WORLD', location=points_a_avg)
             points_a = points_a - points_a_avg
-            #print(points_a[:5]) #Print the first 5 points
-            
+       
             #Storing Shifting coords 
             np.save(os.path.join(stored_data_path, file_name_avg_coords), points_a_avg)
         
@@ -158,6 +155,7 @@ class GetPointCloudData:
         def load_kdtree_pickle_gzip(file_path):
             with gzip.open(file_path, 'rb') as f:
                 return pickle.load(f)  
+            
         use_pickled_kdtree=True
         if use_pickled_kdtree:
             #KDTree handling
@@ -169,7 +167,7 @@ class GetPointCloudData:
                 save_kdtree_pickle_gzip(kdtree_pickle_path, self.points_kdtree)
                 print("Compressed cKD-tree saved at:", kdtree_pickle_path)  
             else:
-                print("kdtree found, loading..")
+                print("kdtree found at: ",kdtree_pickle_path, "loading..")
                 self.points_kdtree = load_kdtree_pickle_gzip(kdtree_pickle_path)
                 print("Compressed cKD-tree loaded from gzip file in:", time.time() - start_time)
         else:  
@@ -213,6 +211,22 @@ class GetPointCloudData:
                 #Store the draw handler reference in the driver namespace
                 bpy.app.driver_namespace['my_draw_handler'] = draw_handler
                 
+                #Calculate the bounding box of the point cloud
+                min_coords = np.min(self.point_coords, axis=0)
+                max_coords = np.max(self.point_coords, axis=0)
+                bbox_center = (min_coords + max_coords) / 2
+                
+                #Get the active 3D view
+                for area in bpy.context.screen.areas:
+                    if area.type == 'VIEW_3D':
+                        break
+                        
+                #Set the view to look at the bounding box center from above at a certain height
+                view3d = area.spaces[0]
+                camera_height=50
+                view3d.region_3d.view_location = (bbox_center[0], bbox_center[1], camera_height)  #X, Y, z meters height
+                #view3d.region_3d.view_rotation = bpy.context.scene.camera.rotation_euler  #Maintaining the current rotation
+                view3d.region_3d.view_distance = camera_height  #Distance from the view point
                 print("openGL point cloud drawn in:",time.time() - start_time,"using ",points_percentage," percent of points (",len(reduced_points),") points") 
                 
             else:
@@ -221,7 +235,7 @@ class GetPointCloudData:
             #Handle any other exceptions that might occur
             print(f"An error occurred: {e}")     
                                 
-#Checks whether the mouseclick happened in the viewport or elsewhere    
+#Function to Check whether the mouseclick happened in the viewport or elsewhere    
 def is_mouse_in_3d_view(context, event):
     
     #Identify the 3D Viewport area and its regions
@@ -283,6 +297,7 @@ def save_kdtree_to_file(file_path, kdtree):
             bpy.ops.object.delete()
     print("saved kdtree to",file_path)
 
+#Function to store obj state
 def store_object_state(obj):
 
     #bpy.ops.object.mode_set(mode='OBJECT')
@@ -303,7 +318,7 @@ def store_object_state(obj):
         'mesh': obj.data.copy() 
     }
     
-#Set origin to geometry center based on object type   
+#Function to set origin to geometry center based on an object
 def set_origin_to_geometry_center(obj):
     if obj.type == 'MESH':
         #For mesh objects, use the built-in function
@@ -322,6 +337,7 @@ def set_origin_to_geometry_center(obj):
             if hasattr(obj.data, "update"):
                 obj.data.update()
 
+#Function to force top view in the viewport
 def set_view_to_top(context):
     #Find the first 3D View
     for area in context.screen.areas:
@@ -329,11 +345,6 @@ def set_view_to_top(context):
             #Get the 3D View
             space_data = area.spaces.active
 
-            #Set the view to top (negative Z axis)
-            #space_data.region_3d.view_rotation = (1, 0, 0, 0)
-            #space_data.region_3d.view_location = (0, 0, 0)  
-            #space_data.region_3d.view_distance = 20  
-            
             #Get the current rotation in Euler angles
             current_euler = space_data.region_3d.view_rotation.to_euler()
 
@@ -345,7 +356,7 @@ def set_view_to_top(context):
             area.tag_redraw()
             break
    
-#Clears the viewport and deletes the draw handler
+#Function to clears the viewport and delete the draw handler
 def redraw_viewport():
     
     #global draw_handler  #Reference the global variable
@@ -368,7 +379,7 @@ def redraw_viewport():
                 
     print("viewport redrawn")
     
-#function to check if a mouseclick is on a white object
+#Function to check if a mouseclick is on a white object
 def is_click_on_white(self, context, location, neighbors=6):
     pointcloud_data = GetPointCloudData()
     point_coords = pointcloud_data.point_coords
@@ -392,7 +403,8 @@ def is_click_on_white(self, context, location, neighbors=6):
     else:
         print("Intensity threshold not met")
         return False
-   
+
+#Function to export the point cloud as a shapefile   
 def export_as_shapefile(points,points_percentage=100,epsg_value=28992):
     
     global point_cloud_name
@@ -421,7 +433,7 @@ def export_as_shapefile(points,points_percentage=100,epsg_value=28992):
     gdf.to_file(output_shapefile_path)
     print("saved shapefile to: ",shapefile_dir," in: ",time.time()-start_time)
 
-#exports point cloud as JSON    
+#Function to export point cloud as JSON    
 def export_as_json(point_coords,point_colors,JSON_data_path,point_cloud_name,points_percentage):
     start_time = time.time()
     print("exporting point cloud data as JSON with",points_percentage, "percent of points")
@@ -448,7 +460,7 @@ def export_as_json(point_coords,point_colors,JSON_data_path,point_cloud_name,poi
 
     print("Combined JSON file compressed and saved at: ", JSON_data_path, "in: ", time.time() - start_time, "seconds")
              
-#installs libraries from a list using pip
+#Function to install libraries from a list using pip
 def install_libraries(library_list):
     for library in library_list:
         try:
@@ -456,7 +468,7 @@ def install_libraries(library_list):
             print(f"Successfully installed {library}")
         except subprocess.CalledProcessError as e:
             print(f"Error installing {library}: {e}")
-            
+#Function to update libraries from a list using pip            
 def update_libraries(library_list):
     for library in library_list:
         try:
@@ -464,7 +476,7 @@ def update_libraries(library_list):
             print(f"Successfully updated {library}")
         except subprocess.CalledProcessError as e:
             print(f"Error updating {library}: {e}")
-            
+#Function to uninstall libraries from a list using pip            
 def uninstall_libraries(library_list):
     for library in library_list:
         try:

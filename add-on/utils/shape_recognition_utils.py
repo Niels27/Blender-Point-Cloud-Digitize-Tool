@@ -99,7 +99,7 @@ def save_shape_as_image(obj):
         bpy.data.materials.remove(mat)
         print("deleted camera, light, and material")
 
-#Opencv shape detection from points    
+#Function that uses Opencv for shape detection done on points    
 def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
 
     if from_bmesh:
@@ -180,3 +180,4 @@ def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
     print(f"Detected shape: {shape}")
 
     return shape
+

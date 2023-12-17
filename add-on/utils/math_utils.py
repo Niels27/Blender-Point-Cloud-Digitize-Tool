@@ -17,7 +17,7 @@ from sklearn.cluster import DBSCAN
 from scipy.interpolate import UnivariateSpline, make_interp_spline, CubicSpline
 
 
-# function to filter bad points
+#function to filter bad points
 def filter_noise_with_dbscan(coords_list, eps=0.04, min_samples=20):
     #DBSCAN clustering
     db = DBSCAN(eps=eps, min_samples=min_samples).fit(coords_list)
@@ -42,6 +42,7 @@ def filter_noise_with_dbscan(coords_list, eps=0.04, min_samples=20):
 
     return filtered_coords
 
+#Function to find the average intensity of given points
 def get_average_intensity(indices, point_colors):
     #if indices is a NumPy array with more than one dimension flatten it
     if isinstance(indices, np.ndarray) and indices.ndim > 1:
@@ -57,22 +58,23 @@ def get_average_intensity(indices, point_colors):
     #Sort the intensities
     sorted_intensities = sorted(intensities)
 
-    #discard the lowest 50% of values
+    #discard the lowest 50% of values to remove outliers
     upper_half = sorted_intensities[len(sorted_intensities) // 2:]
 
     #return the average intensity of the upper half
     return sum(upper_half) / len(upper_half) if upper_half else 0
 
+#Function to find the average color of given points
 def get_average_color(indices,point_colors):
     point_amount=len(indices)
     average_color = np.zeros(3, dtype=float)
     for index in indices:
-        color = point_colors[index] #* 255  #rgb
+        color = point_colors[index]   #rgb
         average_color += color
     average_color /= point_amount
     return average_color
  
-# triangle mark functions
+#Function to move triangle to a line
 def move_triangle_to_line(triangle, line_start, line_end):
     # Convert inputs to numpy arrays for easier calculations
     triangle_np = np.array(triangle)
@@ -98,6 +100,7 @@ def move_triangle_to_line(triangle, line_start, line_end):
 
     return triangle_np.tolist()
 
+#Function to find the base vertices of a triangle
 def find_base_vertices(triangle, line_start, line_end):
     distances = [
         np.linalg.norm(closest_point(vertex, line_start, line_end) - vertex)
@@ -106,6 +109,7 @@ def find_base_vertices(triangle, line_start, line_end):
     sorted_indices = np.argsort(distances)
     return sorted_indices[:2]  # Indices of the two closest vertices
 
+#Function to find the closest vertex to a line
 def find_closest_vertex_to_line(triangle, line_start, line_end):
     min_distance = float("inf")
     closest_vertex_index = -1
@@ -119,6 +123,7 @@ def find_closest_vertex_to_line(triangle, line_start, line_end):
 
     return closest_vertex_index
 
+#Function to find the base vertex of a triangle
 def find_base_vertex(triangle, line_start, line_end):
     min_distance = float("inf")
     base_vertex = None
@@ -134,6 +139,7 @@ def find_base_vertex(triangle, line_start, line_end):
 
     return base_vertex, base_index
 
+#Function to find the closest point on a line to a given point
 def closest_point(point, line_start, line_end):
     line_vec = line_end - line_start
     point_vec = point - line_start
@@ -148,6 +154,7 @@ def closest_point(point, line_start, line_end):
     nearest = line_vec * t
     return line_start + nearest
 
+#Function to find the center of a cluster of points
 def find_cluster_center(context, click_point, direction, range,point_coords, point_colors, points_kdtree):
     intensity_threshold = context.scene.intensity_threshold
  
@@ -176,7 +183,7 @@ def find_cluster_center(context, click_point, direction, range,point_coords, poi
 
     return None
   
-#Finds a high-intensity points cluster near the click point and calculate its center.  
+#Function to find a high-intensity points cluster near the click point and calculate its center.  
 def find_cluster_points(context, click_point, direction, range,point_coords,point_colors,points_kdtree):
     intensity_threshold = context.scene.intensity_threshold
     #Define the search bounds
@@ -248,7 +255,7 @@ def create_middle_points(coords_list, num_segments=10):
 
     return middle_points
 
-#Find the four corner points of the rectangle formed by the given points.
+#Function to Find the four corner points of the rectangle formed by the given points.
 def find_rectangle_corners(points):
     # Extract X and Y coordinates
     x_coords = points[:, 0]
@@ -270,7 +277,7 @@ def find_rectangle_corners(points):
         mark_point(corner, "corner")
     return corners
 
-#Calculate the middle line of the rectangle formed by the corners.
+#Function to calculate the middle line of the rectangle formed by the corners.
 def calculate_middle_line(corners):
     # Calculate the midpoints of opposite sides
     midpoint_left = (
@@ -283,7 +290,7 @@ def calculate_middle_line(corners):
     mark_point(midpoint_right, "midpoint2")
     return midpoint_left, midpoint_right
 
-# snap the drawn line to the center line of the rectangle formed by the cluster.
+# function to snap the drawn line to the center line of the rectangle formed by the cluster.
 def snap_line_to_center_line(first_click_point, second_click_point, cluster):
     corners = find_rectangle_corners(cluster)
     line_start, line_end = calculate_middle_line(corners)
@@ -304,6 +311,27 @@ def snap_line_to_center_line(first_click_point, second_click_point, cluster):
 
     return new_first_click_point, new_second_click_point
 
+#Function to calculate the extreme points without outliers
+def calculate_adjusted_extreme_points(points):
+    # Sort curb points based on their z-coordinate
+    sorted_points = sorted(points, key=lambda p: p[2])
+
+    # Determine the indices for top and bottom 10%
+    ten_percent_index = len(sorted_points) // 10
+    bottom_10_percent = sorted_points[:ten_percent_index]
+    top_10_percent = sorted_points[-ten_percent_index:]
+
+    # Discard the most extreme 50% within those ranges
+    remaining_bottom = bottom_10_percent[len(bottom_10_percent) // 2:]
+    remaining_top = top_10_percent[:len(top_10_percent) // 2]
+
+    # Calculate the average of the remaining points
+    avg_lowest_point = sum((p[2] for p in remaining_bottom), 0.0) / len(remaining_bottom)
+    avg_highest_point = sum((p[2] for p in remaining_top), 0.0) / len(remaining_top)
+
+    return avg_lowest_point, avg_highest_point
+
+#Function that defines a region growing algoritm
 def region_growing(
     point_coords,
     point_colors,
@@ -327,7 +355,7 @@ def region_growing(
         current_index = indices_to_check.pop()
         if current_index not in checked_indices:
             checked_indices.add(current_index)
-            intensity = np.average(point_colors[current_index])  #* 255  #grayscale
+            intensity = np.average(point_colors[current_index])    #grayscale
             if intensity > intensity_threshold:
                 region_growth_coords.append(point_coords[current_index])
                 _, neighbor_indices = points_kdtree.query(
