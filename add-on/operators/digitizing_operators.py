@@ -430,8 +430,8 @@ class CurbDetectionOperator(bpy.types.Operator):
         line_direction /= line_length  #Normalize
         perp_direction = np.array([-line_direction[1], line_direction[0], 0])
         corridor_width = 0.4
-        samples_per_meter = 20
-        num_samples = 20 + int(samples_per_meter * line_length)  #Calculate number of samples based on line length
+        samples_per_meter = 10
+        num_samples = 10 + int(samples_per_meter * line_length)  #Calculate number of samples based on line length
         neighbor_search_distance = 0.2
 
         print(f"Line Direction: {line_direction}, Perpendicular Direction: {perp_direction}") 
@@ -1440,6 +1440,7 @@ class FixedRectangleMarkOperator(bpy.types.Operator):
 
 
 #module imports
-from ..utils.blender_utils import GetPointCloudData, is_mouse_in_3d_view, store_object_state, set_view_to_top
+from ..utils.blender_utils import GetPointCloudData, is_mouse_in_3d_view, set_view_to_top
+from ..utils.math_utils import calculate_adjusted_extreme_points
 from ..utils.digitizing_utils import mark_point, create_shape, create_rectangle_line_object, create_polyline,create_flexible_triangle, create_dots_shape, draw_line, create_flexible_rectangle,create_fixed_square,draw_fixed_triangle
 from ..utils.math_utils import get_average_color, get_average_intensity, filter_noise_with_dbscan, move_triangle_to_line, region_growing

@@ -47,7 +47,6 @@ from . UI.panel import DIGITIZE_PT_Panel
 #Register the operators and panel
 def register():
     bpy.utils.register_class(LAS_OT_OpenOperator)
-    bpy.utils.register_class(LAS_OT_AutoOpenOperator)
     bpy.utils.register_class(CreatePointCloudObjectOperator)
     bpy.utils.register_class(DrawStraightFatLineOperator)
     bpy.utils.register_class(RemoveAllMarkingsOperator)
@@ -95,7 +94,7 @@ def register():
     bpy.types.Scene.points_percentage = bpy.props.IntProperty(
         name="Points %:",
         description="Percentage of points rendered",
-        default=30,  #Default value
+        default=25,  #Default value
         min=1, #Minimum value
         max=100, #Max value  
         subtype='UNSIGNED' 
@@ -161,7 +160,7 @@ def register():
     bpy.types.Scene.extra_z_height = bpy.props.FloatProperty(
         name="Marking Height",
         description="Extra height of all markings compared to the ground level",
-        default=0.05,
+        default=0.01,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.snap_to_road_mark= bpy.props.BoolProperty(
@@ -174,7 +173,6 @@ def register():
 def unregister():
     
     bpy.utils.unregister_class(LAS_OT_OpenOperator) 
-    bpy.utils.unregister_class(LAS_OT_AutoOpenOperator)
     bpy.utils.unregister_class(DrawStraightFatLineOperator)
     bpy.utils.unregister_class(RemoveAllMarkingsOperator)
     bpy.utils.unregister_class(DIGITIZE_PT_Panel)

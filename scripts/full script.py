@@ -253,6 +253,18 @@ class CenterPointCloudOperator(bpy.types.Operator):
         #view3d.region_3d.view_rotation = bpy.context.scene.camera.rotation_euler  #Maintaining the current rotation
         view3d.region_3d.view_distance = viewport_height  #Distance from the view point
 
+        # Ensure there is an active camera in the scene
+        if bpy.context.scene.camera:
+            bpy.context.scene.camera.data.type = 'ORTHO' #Set the camera type to Orthographic, alternatively is PERSP for perspective
+        for area in bpy.context.screen.areas:
+            if area.type == 'VIEW_3D':
+                # Access the 3D View's region data
+                for space in area.spaces:
+                    if space.type == 'VIEW_3D':
+                        # Set the viewport to Orthographic projection
+                        space.region_3d.view_perspective = 'ORTHO'
+                        break  # Exit the loop once the first 3D view is found and set
+                    
         return {'FINISHED'}
 
 #Operator to exports point cloud as shp file
@@ -824,8 +836,8 @@ class CurbDetectionOperator(bpy.types.Operator):
         line_direction /= line_length  #Normalize
         perp_direction = np.array([-line_direction[1], line_direction[0], 0])
         corridor_width = 0.4
-        samples_per_meter = 20
-        num_samples = 20 + int(samples_per_meter * line_length)  #Calculate number of samples based on line length
+        samples_per_meter = 10
+        num_samples = 10 + int(samples_per_meter * line_length)  #Calculate number of samples based on line length
         neighbor_search_distance = 0.2
 
         print(f"Line Direction: {line_direction}, Perpendicular Direction: {perp_direction}") 
@@ -3644,7 +3656,7 @@ def register():
     bpy.types.Scene.extra_z_height = bpy.props.FloatProperty(
         name="Marking Height",
         description="Extra height of all markings compared to the ground level",
-        default=0.05,
+        default=0.01,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.snap_to_road_mark= bpy.props.BoolProperty(
