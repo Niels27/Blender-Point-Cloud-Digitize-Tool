@@ -69,6 +69,7 @@ def register():
     bpy.utils.register_class(CenterPointCloudOperator)
     bpy.utils.register_class(ExportToShapeFileOperator)
     bpy.utils.register_class(FindALlRoadMarkingsOperator)
+    bpy.utils.register_class(DashedLineMarkingOperator)
   
     
     bpy.types.Scene.point_size = IntProperty(name="POINT SIZE",
@@ -94,7 +95,7 @@ def register():
     bpy.types.Scene.points_percentage = bpy.props.IntProperty(
         name="Points %:",
         description="Percentage of points rendered",
-        default=25,  #Default value
+        default=30,  #Default value
         min=1, #Minimum value
         max=100, #Max value  
         subtype='UNSIGNED' 
@@ -197,6 +198,7 @@ def unregister():
     bpy.utils.unregister_class(PopUpOperator)
     bpy.utils.unregister_class(CenterPointCloudOperator)
     bpy.utils.unregister_class(ExportToShapeFileOperator)
+    bpy.utils.unregister_class(DashedLineMarkingOperator)
     
     del bpy.types.Scene.marking_transparency
     del bpy.types.Scene.marking_color
@@ -211,7 +213,7 @@ def unregister():
     del bpy.types.Scene.z_height_cut_off
     del bpy.types.Scene.extra_z_height
     del bpy.types.Scene.points_percentage
-    
+     
                  
 if __name__ == "__main__":
     register()

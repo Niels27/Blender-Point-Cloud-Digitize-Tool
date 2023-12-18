@@ -1680,6 +1680,165 @@ class SnappingLineMarkOperator(bpy.types.Operator):
         print("Operator was properly cancelled")
         return {'CANCELLED'}
 
+#Operator to automatically mark dashed lines after clicking on 2
+class DashedLineMarkingOperator(bpy.types.Operator):
+    bl_idname = "custom.dashed_line_marking_operator"
+    bl_label = "Dashed Line Marking Operator"
+
+    click_count = 0
+    first_cluster_center = None
+    second_cluster_center = None
+    _is_running = False
+    
+    def modal(self, context, event):
+        
+        set_view_to_top(context)
+        pointcloud_data = GetPointCloudData()
+        point_coords = pointcloud_data.point_coords
+        point_colors = pointcloud_data.point_colors
+        points_kdtree=  pointcloud_data.points_kdtree
+        intensity_threshold = context.scene.intensity_threshold
+        
+        if event.type == 'MOUSEMOVE':  
+            self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
+    
+        if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
+            self.click_count += 1
+            click_point = get_click_point_in_3d(context, event)
+
+            if self.click_count == 1:
+                
+                self.first_cluster_center = self.find_cluster_center(points_kdtree, point_coords, point_colors, click_point, intensity_threshold,)
+           
+            elif self.click_count == 2:
+                
+                self.second_cluster_center = self.find_cluster_center(points_kdtree, point_coords, point_colors, click_point, intensity_threshold,)
+
+                if self.first_cluster_center is not None and self.second_cluster_center is not None: #make sure the clusters are not empty
+                    
+                    self.connect_clusters(self.first_cluster_center, self.second_cluster_center)
+                     # Continue finding and connecting additional clusters
+                    self.extend_dashed_lines(points_kdtree, point_coords, point_colors, self.second_cluster_center, self.first_cluster_center, intensity_threshold)
+               
+                self._is_running = False
+                return {'FINISHED'}
+            
+        #Stop the operator of ESCAPE is pressed
+        elif event.type in {'ESC'}:
+            return self.cancel(context)
+
+        return {'PASS_THROUGH'}
+
+    def invoke(self, context, event):
+        self.click_count = 0
+        context.window_manager.modal_handler_add(self)
+        if DashedLineMarkingOperator._is_running:
+            self.report({'WARNING'}, "Operator is already running")
+            return self.cancel(context)
+        self._is_running = True
+        return {'RUNNING_MODAL'}
+
+    def find_cluster_center(self, points_kdtree, point_coords, point_colors, click_point, intensity_threshold, search_radius=0.3):
+       
+        #select points within the specified radius of the click point
+        indices = points_kdtree.query_ball_point(click_point, search_radius)
+        
+        if not indices:
+            print("No points found near the click point")
+            return None
+
+        #Filter points based on the intensity threshold
+        filtered_points = [point_coords[i] for i in indices if np.average(point_colors[i]) >= intensity_threshold]
+        print("Number of cluster points found above ",int(intensity_threshold),f" intensity: {len(filtered_points)}")
+        
+        create_dots_shape(filtered_points,"dash line", True)
+        #create_shape(filtered_points,"")
+
+        if not filtered_points:
+            print("No points above the intensity threshold")
+            return None
+
+        #Calculate the median for each coordinate
+        median_x = np.median([p[0] for p in filtered_points])
+        median_y = np.median([p[1] for p in filtered_points])
+        median_z = np.median([p[2] for p in filtered_points])
+
+        #Combine medians to form the median point
+        median_point = Vector((median_x, median_y, median_z))
+        mark_point(median_point, "dash line center")
+
+        return median_point
+
+    def connect_clusters(self, first_cluster_center, second_cluster_center):
+        
+        if first_cluster_center is None or second_cluster_center is None:
+            print("One of the cluster centers is None. Skipping line creation.")
+            return
+        
+        #Create a new mesh and object
+        mesh = bpy.data.meshes.new(name="Dash Line")
+        obj = bpy.data.objects.new("Dash Line", mesh)
+
+        #Link the object to the scene
+        bpy.context.collection.objects.link(obj)
+        bpy.context.view_layer.objects.active = obj
+        obj.select_set(True)
+
+        #Create a bmesh, add vertices, and create the edge
+        bm = bmesh.new()
+        v1 = bm.verts.new(first_cluster_center)
+        v2 = bm.verts.new(second_cluster_center)
+        bm.edges.new((v1, v2))
+
+        #Update and free the bmesh
+        bm.to_mesh(mesh)
+        bm.free()
+
+    def extend_dashed_lines(self, points_kdtree, point_coords, point_colors, start_cluster_center, end_cluster_center, intensity_threshold, search_radius=0.3):
+        if start_cluster_center is None or end_cluster_center is None:
+            print("One of the cluster centers is None. Cannot extend dashed lines.")
+            return
+        
+        #Calculate initial line direction and length
+        line_direction = np.array(end_cluster_center) - np.array(start_cluster_center)
+        line_length = np.linalg.norm(line_direction)
+        line_direction /= line_length  #Normalize 
+        # Reverse the line direction
+        line_direction = -line_direction
+
+        print(f"Line direction: {line_direction}, Line length: {line_length}")
+    
+        current_search_point = np.array(end_cluster_center)
+        print("searching for more dash lines..")
+        while True:
+            
+            #Move to the next search point
+            current_search_point += line_direction * line_length
+            
+            #mark_point(current_search_point, "Current Search Point")
+            print(f"Searching for a new cluster at: {current_search_point}")
+        
+            #Find a new cluster at this point
+            new_cluster_center = self.find_cluster_center(points_kdtree, point_coords, point_colors, current_search_point, intensity_threshold, search_radius=0.3)
+            
+            if new_cluster_center is None:
+                print("No more clusters found")
+                break  #No more clusters found terminate the search
+            
+            mark_point(new_cluster_center, "dash line center")
+
+            #Connect the previous cluster center to the new cluster center
+            self.connect_clusters(end_cluster_center, new_cluster_center)
+
+            #Update the end cluster center for the next iteration
+            end_cluster_center = new_cluster_center
+            
+    def cancel(self, context):
+
+        DashedLineMarkingOperator._is_running = False  #Reset the flag when the operator is cancelled
+        print("Operator was properly cancelled")  #Debug message
+        return {'CANCELLED'}
+    
 #Operator to automatically mark a curved line at mouseclick            
 class AutoCurvedLineOperator(bpy.types.Operator):
     bl_idname = "custom.auto_curved_line"
@@ -2083,6 +2242,16 @@ def is_mouse_in_3d_view(context, event):
 
     return False  #Default to False if checks fail.        
 
+#function to get 3D click point
+def get_click_point_in_3d(context, event):
+    # Convert the mouse position to 3D space
+    coord_3d = view3d_utils.region_2d_to_location_3d(
+        context.region, context.space_data.region_3d,
+        (event.mouse_region_x, event.mouse_region_y),
+        Vector((0, 0, 0))
+    )
+    return coord_3d
+
 #Function to load KDTree from a file
 def load_kdtree_from_file(file_path):
     if os.path.exists(file_path):
@@ -2402,14 +2571,22 @@ def create_fixed_triangle(coords, side_length=0.5):
 #Function to create a flexible rectangle shape out of coordinates
 def create_flexible_rectangle(coords):
     
-    hull = ConvexHull(coords)
-    vertices = np.array([coords[v] for v in hull.vertices])
-    centroid = np.mean(vertices, axis=0)
-    north = max(vertices, key=lambda p: p[1])
-    south = min(vertices, key=lambda p: p[1])
-    east = max(vertices, key=lambda p: p[0])
-    west = min(vertices, key=lambda p: p[0])
-    return [north, east, south, west]
+    extra_z_height = bpy.context.scene.extra_z_height
+    coords_np = np.array(coords)
+
+    #Find minimum and maximum X and Y coordinates ignoring Z-coordinate if present
+    min_x = np.min(coords_np[:, 0])
+    max_x = np.max(coords_np[:, 0])
+    min_y = np.min(coords_np[:, 1])
+    max_y = np.max(coords_np[:, 1])
+
+    #Create rectangle corners 
+    top_left = (min_x, max_y, extra_z_height)
+    top_right = (max_x, max_y, extra_z_height)
+    bottom_right = (max_x, min_y, extra_z_height)
+    bottom_left = (min_x, min_y, extra_z_height)
+
+    return [top_left, top_right, bottom_right, bottom_left]
 
 #Function to create a fixed rectangle shape at a location
 def create_fixed_square(context, location, size=1.0):
@@ -3524,6 +3701,8 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row.operator("custom.mark_snapping_line", text="Line marker") 
         row.operator("custom.auto_curved_line", text="Auto line marker") 
         layout.operator("custom.curb_detection_operator", text="Curb marker") 
+        layout.operator("custom.dashed_line_marking_operator", text="Dash marker") 
+        layout.operator("custom.curb_detection_operator", text="Curb marker") 
         
         row = layout.row()
         row.prop(scene, "auto_load")
@@ -3565,6 +3744,7 @@ def register():
     bpy.utils.register_class(CenterPointCloudOperator)
     bpy.utils.register_class(ExportToShapeFileOperator)
     bpy.utils.register_class(FindALlRoadMarkingsOperator)
+    bpy.utils.register_class(DashedLineMarkingOperator)
   
     
     bpy.types.Scene.point_size = IntProperty(name="POINT SIZE",
@@ -3694,6 +3874,7 @@ def unregister():
     bpy.utils.unregister_class(PopUpOperator)
     bpy.utils.unregister_class(CenterPointCloudOperator)
     bpy.utils.unregister_class(ExportToShapeFileOperator)
+    bpy.utils.unregister_class(DashedLineMarkingOperator)
     
     del bpy.types.Scene.marking_transparency
     del bpy.types.Scene.marking_color

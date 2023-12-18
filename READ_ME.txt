@@ -58,6 +58,8 @@ Auto line marker: draws curved polyline as far as it can go, it uses middle poin
 
 Curb marker: finds curbs between 2 mouse clicks, then marks the top and bottom using 2 lines.
 
+Dash line marker: click 2 dash lines, the function will try find more in the same direction at the same interval
+
 Save shapes: saves a small picture of every shape drawn from there on out in road_mark_images.
 
 Show dots: some functions create small red feedback dots, useful for debugging.

@@ -2,6 +2,7 @@
 import sys
 import os
 import bpy
+from bpy_extras import view3d_utils
 import gpu
 import bmesh
 from gpu_extras.batch import batch_for_shader
@@ -267,6 +268,16 @@ def is_mouse_in_3d_view(context, event):
             return mouse_inside_view3d
 
     return False  #Default to False if checks fail.        
+
+#function to get 3D click point
+def get_click_point_in_3d(context, event):
+    # Convert the mouse position to 3D space
+    coord_3d = view3d_utils.region_2d_to_location_3d(
+        context.region, context.space_data.region_3d,
+        (event.mouse_region_x, event.mouse_region_y),
+        Vector((0, 0, 0))
+    )
+    return coord_3d
 
 #Function to load KDTree from a file
 def load_kdtree_from_file(file_path):
