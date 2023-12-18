@@ -1345,11 +1345,15 @@ class DashedLineMarkingOperator(bpy.types.Operator):
         filtered_points = [point_coords[i] for i in indices if np.average(point_colors[i]) >= intensity_threshold]
         print("Number of cluster points found above ",int(intensity_threshold),f" intensity: {len(filtered_points)}")
         
-        create_dots_shape(filtered_points,"dash line", True)
-        #create_shape(filtered_points,"")
-
         if not filtered_points:
             print("No points above the intensity threshold")
+            return None
+        
+        # Check if filtered_points is empty before creating a dots shape
+        if len(filtered_points) > 0:
+            create_dots_shape(filtered_points, "dash line", True)
+        else:
+            print("No points to create a shape from")
             return None
 
         #Calculate the median for each coordinate
@@ -1432,6 +1436,7 @@ class DashedLineMarkingOperator(bpy.types.Operator):
         DashedLineMarkingOperator._is_running = False  #Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  #Debug message
         return {'CANCELLED'}
+  
 #Operator to automatically mark a curved line at mouseclick            
 class AutoCurvedLineOperator(bpy.types.Operator):
     bl_idname = "custom.auto_curved_line"

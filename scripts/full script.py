@@ -1751,11 +1751,15 @@ class DashedLineMarkingOperator(bpy.types.Operator):
         filtered_points = [point_coords[i] for i in indices if np.average(point_colors[i]) >= intensity_threshold]
         print("Number of cluster points found above ",int(intensity_threshold),f" intensity: {len(filtered_points)}")
         
-        create_dots_shape(filtered_points,"dash line", True)
-        #create_shape(filtered_points,"")
-
         if not filtered_points:
             print("No points above the intensity threshold")
+            return None
+        
+        # Check if filtered_points is empty before creating a dots shape
+        if len(filtered_points) > 0:
+            create_dots_shape(filtered_points, "dash line", True)
+        else:
+            print("No points to create a shape from")
             return None
 
         #Calculate the median for each coordinate
