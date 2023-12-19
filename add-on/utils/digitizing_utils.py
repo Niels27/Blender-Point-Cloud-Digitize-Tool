@@ -228,14 +228,15 @@ def create_fixed_length_segments(points, segment_length=1.0):
     return extended_points, total_distance, segment_count + 1  # Include the last partial segment
 
 #Function to create different shapes out of points
-def create_shape(coords_list, shape_type,vertices=None):
+def create_shape(coords_list, shape_type,vertices=None,filter_coords=True):
     
     start_time = time.time()
     marking_color = bpy.context.scene.marking_color 
     transparency = bpy.context.scene.marking_transparency
     line_width = bpy.context.scene.fatline_width
     shape_coords = None  #Default to original coordinates
-    coords_list=filter_noise_with_dbscan(coords_list)
+    if filter_coords:
+        coords_list=filter_noise_with_dbscan(coords_list)
     
     if shape_type == "triangle":
         #flexible_coords = create_flexible_triangle(coords_list)
@@ -575,25 +576,8 @@ def snap_line_to_road_mark(self, context, first_click_point, last_click_point,po
     perp_direction = direction.cross(Vector((0, 0, 1))).normalized()
 
     #Find the index of the last click point in the point cloud
-    _, idx = points_kdtree.query([last_click_point], k=1)
+    _, nearest_indices = points_kdtree.query([last_click_point], k=1)
          
-    def region_grow(start_point, radius, threshold):
-        checked_indices = set()
-        indices_to_check = [start_point]
-        region_points = []
-        while indices_to_check:
-            current_index = indices_to_check.pop()
-            if current_index not in checked_indices:
-                checked_indices.add(current_index)
-                point_intensity = np.average(point_colors[current_index]) 
-                if point_intensity > threshold:
-                    region_points.append(point_coords[current_index])
-                    _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
-                    indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
-        for point in region_points: 
-            mark_point(point,"region_point",0.02) #visualize the search area
-        return region_points
-    
     #Function to find the most outward points of a region
     def find_outward_points(region_points, direction):
         #Project all points to the direction vector and find the most outward points
@@ -603,11 +587,12 @@ def snap_line_to_road_mark(self, context, first_click_point, last_click_point,po
         return region_points[min_proj_index], region_points[max_proj_index]
     #Function to snap the last click point to a road mark    
     def snap_last_point(_first_click_point, _last_click_point):
-        
+       
         #Perform region growing on the last click point
-        region = region_grow(idx[0], region_radius, intensity_threshold)
-        if region:
-            edge1, edge2 = find_outward_points(region, perp_direction)
+        region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, region_radius, intensity_threshold, region_growth_coords)         
+
+        if region_growth_coords:
+            edge1, edge2 = find_outward_points(region_growth_coords, perp_direction)
 
             #Calculate the new click point based on the edges
             _last_click_point = (edge1 + edge2) * 0.5

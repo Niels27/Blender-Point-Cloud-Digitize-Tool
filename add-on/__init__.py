@@ -4,7 +4,7 @@ bl_info = {
     "name": "Point Cloud Digitizing Tool",
     "description": "A custom add-on for digitizing road marks in point clouds",
     "author": "Niels van der Wal",
-    "version": (1, 1, 2),
+    "version": (1, 1, 3),
     "blender": (3, 4, 0),  
     "location": "View3D > Tools > Digitize Tool",
     "category": "3D View"
@@ -95,7 +95,7 @@ def register():
     bpy.types.Scene.points_percentage = bpy.props.IntProperty(
         name="Points %:",
         description="Percentage of points rendered",
-        default=30,  #Default value
+        default=25,  #Default value
         min=1, #Minimum value
         max=100, #Max value  
         subtype='UNSIGNED' 

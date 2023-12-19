@@ -28,26 +28,9 @@ def install_libraries(library_list):
             print(f"Successfully installed {library}")
         except subprocess.CalledProcessError as e:
             print(f"Error installing {library}: {e}")
-            
-def update_libraries(library_list):
-    for library in library_list:
-        try:
-            subprocess.check_call([sys.executable, '-m', 'pip', 'install','--upgrade', library])
-            print(f"Successfully updated {library}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error updating {library}: {e}")
-            
-def uninstall_libraries(library_list):
-    for library in library_list:
-        try:
-            subprocess.check_call([sys.executable, '-m', 'pip', 'uninstall', library])
-            print(f"Successfully uninstall {library}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error uninstall {library}: {e}")                    
-
+                          
 #install_libraries()    
-#update_libraries() 
-#uninstall_libraries()  
+
 
 #imports
 import bpy
@@ -74,7 +57,6 @@ import pickle
 import gzip
 import pandas as pd
 import geopandas as gpd
-from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
 from collections import deque
 from multiprocessing import Pool
 from joblib import dump, load 
@@ -109,7 +91,7 @@ class LAS_OT_OpenOperator(bpy.types.Operator):
     
     def execute(self, context):
         start_time = time.time()
-      
+        bpy.context.scene.auto_load = False
         bpy.context.scene["Filepath to the loaded pointcloud"] = self.filepath
         sparsity_value = bpy.context.scene.sparsity_value
         point_size = bpy.context.scene.point_size
@@ -186,7 +168,6 @@ class GetPointsInfoOperator(bpy.types.Operator):
                 #Get the mouse coordinates
                 x, y = event.mouse_region_x, event.mouse_region_y
                 #Convert 2D mouse coordinates to 3D view coordinates
-                view3d = context.space_data
                 region = context.region
                 region_3d = context.space_data.region_3d
                 location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
@@ -459,7 +440,6 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
         width = context.scene.fatline_width
         extra_z_height = context.scene.extra_z_height
         
-        view3d = context.space_data
         region = context.region
         region_3d = context.space_data.region_3d
 
@@ -528,18 +508,13 @@ class SimpleMarkOperator(bpy.types.Operator):
             self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
             
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
-            
-            start_time = time.time()
+
             #Get the mouse coordinates
             x, y = event.mouse_region_x, event.mouse_region_y
             #Convert 2D mouse coordinates to 3D view coordinates
-            view3d = context.space_data
             region = context.region
             region_3d = context.space_data.region_3d
             location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
-
-            #Get the z coordinate from 3D space
-            z = location.z
 
             #Do a nearest-neighbor search
             num_neighbors = 16  #Number of neighbors 
@@ -620,18 +595,13 @@ class ComplexMarkOperator(bpy.types.Operator):
             self.mouse_inside_view3d = is_mouse_in_3d_view(context, event) 
 
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
-            clicked=True
-            start_time = time.time()
+
             #Get the mouse coordinates
             x, y = event.mouse_region_x, event.mouse_region_y
             #Convert 2D mouse coordinates to 3D view coordinates
-            view3d = context.space_data
             region = context.region
             region_3d = context.space_data.region_3d
             location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
-
-            #Get the z coordinate from 3D space
-            z = location.z
 
             #Do a nearest-neighbor search
             num_neighbors = 16  #Number of neighbors 
@@ -726,7 +696,7 @@ class FindALlRoadMarkingsOperator(bpy.types.Operator):
 
             intensity = np.average(color)   
             if intensity > intensity_threshold:
-                rectangle_coords = []
+                region_growth_coords = []
                 indices_to_check = [idx]
                 while indices_to_check:
                     current_index = indices_to_check.pop()
@@ -734,13 +704,13 @@ class FindALlRoadMarkingsOperator(bpy.types.Operator):
                         checked_indices.add(current_index)
                         intensity = np.average(point_colors[current_index]) 
                         if intensity > intensity_threshold:
-                            rectangle_coords.append(point_coords[current_index])
+                            region_growth_coords.append(point_coords[current_index])
                             _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
                             indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
                 
                 #Check point count before adding to draw list
-                if len(rectangle_coords) >= point_threshold:
-                    all_white_object_coords.append(rectangle_coords)
+                if len(region_growth_coords) >= point_threshold:
+                    all_white_object_coords.append(region_growth_coords)
                     white_objects_count += 1  #Increment counter when valid white object is found
 
         #Update the last processed index
@@ -827,61 +797,57 @@ class CurbDetectionOperator(bpy.types.Operator):
     
     #Detects the curb points between 2 mouseclicks, based on points without neighbors to the left and right
     def detect_curb_points(self, points_kdtree,point_coords, first_click_point, second_click_point):
-        
+            
         print("Starting curb detection...") 
         curb_points_indices = []
 
         line_direction = np.array(second_click_point) - np.array(first_click_point)
         line_length = np.linalg.norm(line_direction)
-        line_direction /= line_length  #Normalize
+        line_direction /= line_length  # Normalize
         perp_direction = np.array([-line_direction[1], line_direction[0], 0])
-        corridor_width = 0.4
-        samples_per_meter = 10
-        num_samples = 10 + int(samples_per_meter * line_length)  #Calculate number of samples based on line length
+        corridor_width = 0.25
         neighbor_search_distance = 0.2
 
-        print(f"Line Direction: {line_direction}, Perpendicular Direction: {perp_direction}") 
+        middle_point = (np.array(first_click_point) + np.array(second_click_point)) / 2
+        half_num_samples = int(5 * line_length)  # Half the number of samples on each side
 
-        for i in range(num_samples):
-            t = i / (num_samples - 1)
-            sample_point = np.array(first_click_point) + t * line_direction * line_length
-            if(i==1 ):
-                mark_point(sample_point, "curb start", 0.1)
-            if(i==num_samples-1 ):
-                mark_point(sample_point, "curb end", 0.1)
-            #Query KDTree for points within the corridor width around the sample point
+        #Function to check and add curb points
+        def check_and_add_curb_points(sample_point):
             indices = points_kdtree.query_ball_point(sample_point, corridor_width / 2)
-
             for idx in indices:
                 point = point_coords[idx]
-
-                #Check neighbors to the left and right
-                left_neighbor = points_kdtree.query_ball_point(point - perp_direction * neighbor_search_distance, 0.08)
-                right_neighbor = points_kdtree.query_ball_point(point + perp_direction * neighbor_search_distance, 0.08)
-
+                left_neighbor = points_kdtree.query_ball_point(point - perp_direction * neighbor_search_distance, 0.05)
+                right_neighbor = points_kdtree.query_ball_point(point + perp_direction * neighbor_search_distance, 0.05)
                 if not left_neighbor or not right_neighbor:
                     curb_points_indices.append(idx)
+
+        #Start sampling from the middle and expand outwards
+        for i in range(half_num_samples):
+            t = i / half_num_samples
+            sample_point_left = middle_point - t * line_direction * line_length / 2
+            sample_point_right = middle_point + t * line_direction * line_length / 2
+
+            check_and_add_curb_points(sample_point_left)
+            check_and_add_curb_points(sample_point_right)
+
+            if len(curb_points_indices) >= 1000:  # Stop if the limit is reached
+                break
 
         #Extract unique indices as curb points may be found multiple times
         unique_indices = list(set(curb_points_indices))
         curb_points = [point_coords[idx] for idx in unique_indices]
-        
-        #Extract x, y, and z coordinates
-        x_coords = [p[0] for p in curb_points]
-        y_coords = [p[1] for p in curb_points]
-        z_coords = [p[2] for p in curb_points]
 
         #Calculate the median for each coordinate
-        median_x = np.median(x_coords)
-        median_y = np.median(y_coords)
-        median_z = np.median(z_coords)
+        median_x = np.median([p[0] for p in curb_points])
+        median_y = np.median([p[1] for p in curb_points])
+        median_z = np.median([p[2] for p in curb_points])
         median_curb_point = Vector((median_x, median_y, median_z))
-        
+
         print(f"Total unique curb points found: {len(curb_points)}")   
         #visualize the curb points           
-        #create_dots_shape(curb_points,"curb shape",True)
-        return curb_points,median_curb_point
-    
+        create_dots_shape(curb_points,"curb shape",False)
+        return curb_points, median_curb_point
+
     #Function to draw a line between 2 points, trough the median curb point       
     def draw_curb_line(self, first_click_point, second_click_point, curb_height, median_curb_point=None):
         # Create a new mesh and object
@@ -943,7 +909,6 @@ class SelectionDetectionOpterator(bpy.types.Operator):
             #Get the mouse coordinates
             x, y = event.mouse_region_x, event.mouse_region_y
             #Convert 2D mouse coordinates to 3D view coordinates
-            view3d = context.space_data
             region = context.region
             region_3d = context.space_data.region_3d
             location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
@@ -1013,7 +978,7 @@ class SelectionDetectionOpterator(bpy.types.Operator):
                 continue
 
             #Region growing algorithm
-            rectangle_coords = []
+            region_growth_coords = []
             indices_to_check = [idx]
             while indices_to_check:
                 current_index = indices_to_check.pop()
@@ -1021,13 +986,13 @@ class SelectionDetectionOpterator(bpy.types.Operator):
                     checked_indices.add(current_index)
                     intensity = np.average(filtered_colors[current_index]) 
                     if intensity > intensity_threshold:
-                        rectangle_coords.append(filtered_points[current_index])
+                        region_growth_coords.append(filtered_points[current_index])
                         _, neighbor_indices = filtered_kdtree.query([filtered_points[current_index]], k=radius)
                         indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
 
             #Check point count before adding to draw list
-            if len(rectangle_coords) >= point_threshold:
-                all_white_object_coords.append(rectangle_coords)
+            if len(region_growth_coords) >= point_threshold:
+                all_white_object_coords.append(region_growth_coords)
                 white_objects_count += 1  #Increment counter when valid white object is found
                 
         print("road marks found: ", white_objects_count)
@@ -1094,11 +1059,9 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
             
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
             
-            start_time = time.time()
             #Get the mouse coordinates
             x, y = event.mouse_region_x, event.mouse_region_y
             #Convert 2D mouse coordinates to 3D view coordinates
-            view3d = context.space_data
             region = context.region
             region_3d = context.space_data.region_3d
             location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
@@ -1194,7 +1157,6 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
         
         _, nearest_indices = points_kdtree.query([location], k=16)
         average_intensity = get_average_intensity(nearest_indices[0],point_colors)
-        average_color = get_average_color(nearest_indices[0],point_colors)
 
         if (average_intensity > intensity_threshold) and not self._processed_indices.intersection(nearest_indices[0]):
             #Proceed if the intensity is above the threshold and the area hasn't been processed yet
@@ -1284,30 +1246,19 @@ class TriangleMarkOperator(bpy.types.Operator):
         #Get the mouse coordinates
         x, y = event.mouse_region_x, event.mouse_region_y
         location = region_2d_to_location_3d(context.region, context.space_data.region_3d, (x, y), (0, 0, 0))
-        triangle_coords=[]
+        region_growth_coords=[]
+        search_radius=20
         #Nearest-neighbor search
         _, nearest_indices = points_kdtree.query([location], k=16)
         average_intensity = get_average_intensity(nearest_indices[0],point_colors)
-        average_color = get_average_color(nearest_indices[0],point_colors)
         if average_intensity > intensity_threshold:
             #Region growing algorithm
-            checked_indices = set()
-            indices_to_check = list(nearest_indices[0])
-            
-            while indices_to_check:   
-                current_index = indices_to_check.pop()
-                if current_index not in checked_indices:
-                    checked_indices.add(current_index)
-                    intensity = np.average(point_colors[current_index]) 
-                    if intensity > intensity_threshold:
-                        triangle_coords.append(point_coords[current_index])
-                        _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=50)
-                        indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
+            region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, search_radius, intensity_threshold, region_growth_coords)         
 
-            if triangle_coords:
+            if region_growth_coords:
   
                 #current_triangle_coords=[point_coords[i] for i in checked_indices]
-                filtered_current_triangle_coords=filter_noise_with_dbscan(triangle_coords)
+                filtered_current_triangle_coords=filter_noise_with_dbscan(region_growth_coords)
                 self._processed_indices.update(checked_indices)
                 current_triangle_vertices = create_flexible_triangle(filtered_current_triangle_coords)
                 self._triangles.append(current_triangle_vertices)
@@ -1412,17 +1363,12 @@ class RectangleMarkOperator(bpy.types.Operator):
             
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
             
-            start_time = time.time()
             #Get the mouse coordinates
             x, y = event.mouse_region_x, event.mouse_region_y
             #Convert 2D mouse coordinates to 3D view coordinates
-            view3d = context.space_data
             region = context.region
             region_3d = context.space_data.region_3d
             location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
-
-            #Get the z coordinate from 3D space
-            z = location.z
 
             #Do a nearest-neighbor search
             num_neighbors = 16  #Number of neighbors 
@@ -1459,7 +1405,6 @@ class RectangleMarkOperator(bpy.types.Operator):
 
         return {'PASS_THROUGH'}
 
-    
     def invoke(self, context, event):
         if SimpleMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
@@ -1503,17 +1448,12 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
             
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
             
-            start_time = time.time()
             #Get the mouse coordinates
             x, y = event.mouse_region_x, event.mouse_region_y
             #Convert 2D mouse coordinates to 3D view coordinates
-            view3d = context.space_data
             region = context.region
             region_3d = context.space_data.region_3d
             location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
-
-            #Get the z coordinate from 3D space
-            z = location.z
 
             #Do a nearest-neighbor search
             num_neighbors = 16  #Number of neighbors 
@@ -1539,15 +1479,13 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
                 print("no road markings found")
             
             if region_growth_coords:
-                #filters out bad points
-                #filtered_rectangle_coords=filter_noise_with_dbscan(rectangle_coords)
                 self._processed_indices.update(checked_indices)
                 rectangle_vertices = create_flexible_rectangle(region_growth_coords)
                 self._rectangles.append(rectangle_vertices)
-                create_shape(region_growth_coords, shape_type="rectangle")
+                create_shape(region_growth_coords, shape_type="rectangle",vertices=None, filter_coords=True)
 
                 if len(self._rectangles) == 2:
-                    #center_points= self.find_center_points(self._rectangles[0], self._rectangles[1])
+                    
                     self.perform_automatic_marking(context, intensity_threshold,point_coords,point_colors,points_kdtree)
         #If escape is pressed, stop the operator            
         elif event.type == 'ESC':
@@ -1704,7 +1642,15 @@ class DashedLineMarkingOperator(bpy.types.Operator):
     
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
             self.click_count += 1
-            click_point = get_click_point_in_3d(context, event)
+            #Get the mouse coordinates
+            x, y = event.mouse_region_x, event.mouse_region_y
+            #Convert 2D mouse coordinates to 3D view coordinates
+            region = context.region
+            region_3d = context.space_data.region_3d
+            click_point = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
+
+            #Get the z coordinate from 3D space
+            z = click_point.z
 
             if self.click_count == 1:
                 
@@ -1863,17 +1809,12 @@ class AutoCurvedLineOperator(bpy.types.Operator):
             
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
             
-            start_time = time.time()
             #Get the mouse coordinates
             x, y = event.mouse_region_x, event.mouse_region_y
             #Convert 2D mouse coordinates to 3D view coordinates
-            view3d = context.space_data
             region = context.region
             region_3d = context.space_data.region_3d
             location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
-
-            #Get the z coordinate from 3D space
-            z = location.z
 
             #Do a nearest-neighbor search
             num_neighbors = 16  #Number of neighbors 
@@ -1940,14 +1881,10 @@ class FixedTriangleMarkOperator(bpy.types.Operator):
             if context.area and context.area.type == 'VIEW_3D':
                 #Get the mouse coordinates
                 x, y = event.mouse_region_x, event.mouse_region_y
-                #Convert 2D mouse coordinates to 3D view coordinates
-                view3d = context.space_data
                 region = context.region
                 region_3d = context.space_data.region_3d
                 location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
 
-                #Get the z coordinate from 3d space
-                z = location.z
                 draw_fixed_triangle(context, location, size=0.5)
           
             else:
@@ -1977,19 +1914,15 @@ class FixedRectangleMarkOperator(bpy.types.Operator):
         if event.type == 'MOUSEMOVE':  
             self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
 
-
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
             if context.area and context.area.type == 'VIEW_3D':
                 #Get the mouse coordinates
                 x, y = event.mouse_region_x, event.mouse_region_y
                 #Convert 2D mouse coordinates to 3D view coordinates
-                view3d = context.space_data
                 region = context.region
                 region_3d = context.space_data.region_3d
                 location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
 
-                #Get the z coordinate from 3d space
-                z = location.z
                 create_fixed_square(context, location, size=0.5)
           
             else:
@@ -2327,6 +2260,7 @@ def set_origin_to_geometry_center(obj):
 
 #Function to force top view in the viewport
 def set_view_to_top(context):
+    
     #Find the first 3D View
     for area in context.screen.areas:
         if area.type == 'VIEW_3D':
@@ -2370,7 +2304,6 @@ def redraw_viewport():
 #Function to check if a mouseclick is on a white object
 def is_click_on_white(self, context, location, neighbors=6):
     pointcloud_data = GetPointCloudData()
-    point_coords = pointcloud_data.point_coords
     point_colors = pointcloud_data.point_colors
     points_kdtree=  pointcloud_data.points_kdtree
     intensity_threshold = context.scene.intensity_threshold
@@ -2693,14 +2626,15 @@ def create_fixed_length_segments(points, segment_length=1.0):
     return extended_points, total_distance, segment_count + 1  # Include the last partial segment
 
 #Function to create different shapes out of points
-def create_shape(coords_list, shape_type,vertices=None):
+def create_shape(coords_list, shape_type,vertices=None,filter_coords=True):
     
     start_time = time.time()
     marking_color = bpy.context.scene.marking_color 
     transparency = bpy.context.scene.marking_transparency
     line_width = bpy.context.scene.fatline_width
     shape_coords = None  #Default to original coordinates
-    coords_list=filter_noise_with_dbscan(coords_list)
+    if filter_coords:
+        coords_list=filter_noise_with_dbscan(coords_list)
     
     if shape_type == "triangle":
         #flexible_coords = create_flexible_triangle(coords_list)
@@ -2781,7 +2715,6 @@ def draw_line(self, context, event,point_coords, point_colors, points_kdtree):
     snap_to_road_mark = context.scene.snap_to_road_mark
     extra_z_height = context.scene.extra_z_height
     
-    view3d = context.space_data
     region = context.region
     region_3d = context.space_data.region_3d
     
@@ -2849,7 +2782,6 @@ def create_rectangle_line_object(start, end):
     width = context.scene.fatline_width
     #Calculate the direction vector and its length
     direction = end - start
-    length = direction.length
 
     direction.normalize()
 
@@ -2909,7 +2841,6 @@ def create_rectangle_line_object(start, end):
 #Function to create multiple squares on top of detected points, then combines them into one shape
 def create_dots_shape(coords_list,name="Dots Shape", filter_points=True):
     
-    start_time=time.time()
     global shape_counter
     
     marking_color=bpy.context.scene.marking_color
@@ -3040,25 +2971,8 @@ def snap_line_to_road_mark(self, context, first_click_point, last_click_point,po
     perp_direction = direction.cross(Vector((0, 0, 1))).normalized()
 
     #Find the index of the last click point in the point cloud
-    _, idx = points_kdtree.query([last_click_point], k=1)
+    _, nearest_indices = points_kdtree.query([last_click_point], k=1)
          
-    def region_grow(start_point, radius, threshold):
-        checked_indices = set()
-        indices_to_check = [start_point]
-        region_points = []
-        while indices_to_check:
-            current_index = indices_to_check.pop()
-            if current_index not in checked_indices:
-                checked_indices.add(current_index)
-                point_intensity = np.average(point_colors[current_index]) 
-                if point_intensity > threshold:
-                    region_points.append(point_coords[current_index])
-                    _, neighbor_indices = points_kdtree.query([point_coords[current_index]], k=radius)
-                    indices_to_check.extend(neighbor_index for neighbor_index in neighbor_indices[0] if neighbor_index not in checked_indices)
-        for point in region_points: 
-            mark_point(point,"region_point",0.02) #visualize the search area
-        return region_points
-    
     #Function to find the most outward points of a region
     def find_outward_points(region_points, direction):
         #Project all points to the direction vector and find the most outward points
@@ -3068,11 +2982,12 @@ def snap_line_to_road_mark(self, context, first_click_point, last_click_point,po
         return region_points[min_proj_index], region_points[max_proj_index]
     #Function to snap the last click point to a road mark    
     def snap_last_point(_first_click_point, _last_click_point):
-        
+       
         #Perform region growing on the last click point
-        region = region_grow(idx[0], region_radius, intensity_threshold)
-        if region:
-            edge1, edge2 = find_outward_points(region, perp_direction)
+        region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, region_radius, intensity_threshold, region_growth_coords)         
+
+        if region_growth_coords:
+            edge1, edge2 = find_outward_points(region_growth_coords, perp_direction)
 
             #Calculate the new click point based on the edges
             _last_click_point = (edge1 + edge2) * 0.5
@@ -3387,34 +3302,32 @@ def snap_line_to_center_line(first_click_point, second_click_point, cluster):
 
 #Function to calculate the extreme points without outliers
 def calculate_adjusted_extreme_points(points):
-    # Sort curb points based on their z-coordinate
+    
+    if len(points) < 20:
+        #For fewer than 20 points handle differently
+        z_coords = [p[2] for p in points]
+        return min(z_coords), max(z_coords)
+
+    #Sort curb points based on their z-coordinate
     sorted_points = sorted(points, key=lambda p: p[2])
 
-    # Determine the indices for top and bottom 10%
+    #Determine the indices for top and bottom 10%
     ten_percent_index = len(sorted_points) // 10
     bottom_10_percent = sorted_points[:ten_percent_index]
     top_10_percent = sorted_points[-ten_percent_index:]
 
-    # Discard the most extreme 50% within those ranges
+    #Discard the most extreme 50% within those ranges
     remaining_bottom = bottom_10_percent[len(bottom_10_percent) // 2:]
     remaining_top = top_10_percent[:len(top_10_percent) // 2]
 
-    # Calculate the average of the remaining points
-    avg_lowest_point = sum((p[2] for p in remaining_bottom), 0.0) / len(remaining_bottom)
-    avg_highest_point = sum((p[2] for p in remaining_top), 0.0) / len(remaining_top)
+    #calculate the average of the remaining points, prevent division by zero
+    avg_lowest_point = sum((p[2] for p in remaining_bottom), 0.0) / len(remaining_bottom) if len(remaining_bottom) > 0 else 0
+    avg_highest_point = sum((p[2] for p in remaining_top), 0.0) / len(remaining_top) if len(remaining_top) > 0 else 0
 
     return avg_lowest_point, avg_highest_point
 
 #Function that defines a region growing algoritm
-def region_growing(
-    point_coords,
-    point_colors,
-    points_kdtree,
-    nearest_indices,
-    radius,
-    intensity_threshold,
-    region_growth_coords,
-):
+def region_growing(point_coords,point_colors,points_kdtree,nearest_indices,radius,intensity_threshold,region_growth_coords):
     # Region growing algorithm
     start_time = time.time()
     checked_indices = set()

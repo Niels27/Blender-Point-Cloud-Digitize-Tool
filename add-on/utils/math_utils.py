@@ -17,6 +17,7 @@ from sklearn.cluster import DBSCAN
 from scipy.interpolate import UnivariateSpline, make_interp_spline, CubicSpline
 
 
+#Math functions
 #function to filter bad points
 def filter_noise_with_dbscan(coords_list, eps=0.04, min_samples=20):
     #DBSCAN clustering
@@ -313,34 +314,32 @@ def snap_line_to_center_line(first_click_point, second_click_point, cluster):
 
 #Function to calculate the extreme points without outliers
 def calculate_adjusted_extreme_points(points):
-    # Sort curb points based on their z-coordinate
+    
+    if len(points) < 20:
+        #For fewer than 20 points handle differently
+        z_coords = [p[2] for p in points]
+        return min(z_coords), max(z_coords)
+
+    #Sort curb points based on their z-coordinate
     sorted_points = sorted(points, key=lambda p: p[2])
 
-    # Determine the indices for top and bottom 10%
+    #Determine the indices for top and bottom 10%
     ten_percent_index = len(sorted_points) // 10
     bottom_10_percent = sorted_points[:ten_percent_index]
     top_10_percent = sorted_points[-ten_percent_index:]
 
-    # Discard the most extreme 50% within those ranges
+    #Discard the most extreme 50% within those ranges
     remaining_bottom = bottom_10_percent[len(bottom_10_percent) // 2:]
     remaining_top = top_10_percent[:len(top_10_percent) // 2]
 
-    # Calculate the average of the remaining points
-    avg_lowest_point = sum((p[2] for p in remaining_bottom), 0.0) / len(remaining_bottom)
-    avg_highest_point = sum((p[2] for p in remaining_top), 0.0) / len(remaining_top)
+    #calculate the average of the remaining points, prevent division by zero
+    avg_lowest_point = sum((p[2] for p in remaining_bottom), 0.0) / len(remaining_bottom) if len(remaining_bottom) > 0 else 0
+    avg_highest_point = sum((p[2] for p in remaining_top), 0.0) / len(remaining_top) if len(remaining_top) > 0 else 0
 
     return avg_lowest_point, avg_highest_point
 
 #Function that defines a region growing algoritm
-def region_growing(
-    point_coords,
-    point_colors,
-    points_kdtree,
-    nearest_indices,
-    radius,
-    intensity_threshold,
-    region_growth_coords,
-):
+def region_growing(point_coords,point_colors,points_kdtree,nearest_indices,radius,intensity_threshold,region_growth_coords):
     # Region growing algorithm
     start_time = time.time()
     checked_indices = set()
