@@ -1328,7 +1328,7 @@ class DashedLineMarkingOperator(bpy.types.Operator):
 
         #Combine medians to form the median point
         median_point = Vector((median_x, median_y, median_z))
-        mark_point(median_point, "dash line center")
+        mark_point(median_point, "dash line center", size=0.1)
 
         return median_point
 
@@ -1388,7 +1388,7 @@ class DashedLineMarkingOperator(bpy.types.Operator):
                 print("No more clusters found")
                 break  #No more clusters found terminate the search
             
-            mark_point(new_cluster_center, "dash line center")
+            mark_point(new_cluster_center, "dash line center", size=0.1)
 
             #Connect the previous cluster center to the new cluster center
             self.connect_clusters(end_cluster_center, new_cluster_center)

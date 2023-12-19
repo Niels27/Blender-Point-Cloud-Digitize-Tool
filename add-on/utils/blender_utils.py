@@ -48,7 +48,7 @@ class GetPointCloudData:
         return cls._instance
     
     #Function to load the point cloud, store it's data and draw it using openGL, optimized version
-    def pointcloud_load_optimized(self,path, point_size, sparsity_value,points_percentage,z_height_cut_off):
+    def pointcloud_load_optimized(self,path, point_size, sparsity_value,z_height_cut_off):
         
         start_time = time.time()
         print("Started loading point cloud.."),
@@ -61,7 +61,7 @@ class GetPointCloudData:
         if blend_file_path:
             directory = os.path.dirname(blend_file_path)
         else:
-        # Prompt the user to save the file first 
+        #Prompt the user to save the file first 
             print("please save blender project first!")
             return
         directory = os.path.dirname(blend_file_path)
@@ -78,9 +78,29 @@ class GetPointCloudData:
             os.mkdir(stored_data_path)
         
         if not os.path.exists(os.path.join(stored_data_path, file_name_points)):
-            point_cloud = lp.read(path)
-            points_a = np.vstack((point_cloud.x, point_cloud.y, point_cloud.z)).transpose()
-            colors_a = np.vstack((point_cloud.red, point_cloud.green, point_cloud.blue)).transpose() / 65535
+            
+            point_cloud = lp.read(path) 
+            ground_code = 2 #the ground is usually 2
+
+            print(f"Using classification code for GROUND: {ground_code}")
+            use_ground_points_only=bpy.context.scene.ground_only
+            if use_ground_points_only:
+                # Filter points based on classification
+                ground_points_mask = point_cloud.classification == ground_code
+                if ground_points_mask.any():
+                    # Applying the ground points mask
+                    points_a = np.vstack((point_cloud.x[ground_points_mask], 
+                                        point_cloud.y[ground_points_mask], 
+                                        point_cloud.z[ground_points_mask])).transpose()
+                    colors_a = np.vstack((point_cloud.red[ground_points_mask], 
+                                        point_cloud.green[ground_points_mask], 
+                                        point_cloud.blue[ground_points_mask])).transpose() / 65535
+                else:
+                    print("classification ", ground_code, " not found")
+            else: 
+                points_a = np.vstack((point_cloud.x, point_cloud.y, point_cloud.z)).transpose()
+                colors_a = np.vstack((point_cloud.red, point_cloud.green, point_cloud.blue)).transpose() / 65535
+                
             #Convert points to float32
             points_a = points_a.astype(np.float32)
             #Convert colors to uint8
@@ -131,22 +151,15 @@ class GetPointCloudData:
         
         print("point cloud loaded in: ", time.time() - start_time)
         
-        if sparsity_value == 1 and points_percentage<100: 
-            #Calculate sparsity value based on the desired percentage
-            desired_sparsity = int(1 / (points_percentage / 100))
+        step = int(1 / sparsity_value)
 
-            #Evenly sample points based on the calculated sparsity
-            reduced_indices = range(0, len(points_a), desired_sparsity)
-            reduced_points = points_a[reduced_indices]
-            reduced_colors = colors_a[reduced_indices]
-        else:
-            #Evenly sample points using the provided sparsity value
-            reduced_points = points_a[::sparsity_value]
-            reduced_colors = colors_a[::sparsity_value]
+        #Evenly sample points using the provided sparsity value
+        reduced_points = points_a[::step]
+        reduced_colors = colors_a[::step]
             
         #Save json file of point cloud data
         if save_json:
-            export_as_json(reduced_points,reduced_colors,JSON_data_path,point_cloud_name,points_percentage)
+            export_as_json(reduced_points,reduced_colors,JSON_data_path,point_cloud_name)
   
         #Function to save KD-tree with pickle and gzip
         def save_kdtree_pickle_gzip(file_path, kdtree):
@@ -228,14 +241,14 @@ class GetPointCloudData:
                 view3d.region_3d.view_location = (bbox_center[0], bbox_center[1], camera_height)  #X, Y, z meters height
                 #view3d.region_3d.view_rotation = bpy.context.scene.camera.rotation_euler  #Maintaining the current rotation
                 view3d.region_3d.view_distance = camera_height  #Distance from the view point
-                print("openGL point cloud drawn in:",time.time() - start_time,"using ",points_percentage," percent of points (",len(reduced_points),") points") 
+                print("openGL point cloud drawn in:",time.time() - start_time,"using ",sparsity_value*100," percent of points (",len(reduced_points),") points") 
                 
             else:
                 print("Draw handler already exists, skipping drawing")
         except Exception as e:
             #Handle any other exceptions that might occur
             print(f"An error occurred: {e}")     
-                                
+                               
 #Function to Check whether the mouseclick happened in the viewport or elsewhere    
 def is_mouse_in_3d_view(context, event):
     
@@ -445,9 +458,9 @@ def export_as_shapefile(points,points_percentage=100,epsg_value=28992):
     print("saved shapefile to: ",shapefile_dir," in: ",time.time()-start_time)
 
 #Function to export point cloud as JSON    
-def export_as_json(point_coords,point_colors,JSON_data_path,point_cloud_name,points_percentage):
+def export_as_json(point_coords,point_colors,JSON_data_path,point_cloud_name):
     start_time = time.time()
-    print("exporting point cloud data as JSON with",points_percentage, "percent of points")
+    print("exporting point cloud data as JSON")
     #Adjusting the structure to match the expected format
     point_cloud_data = [
         {

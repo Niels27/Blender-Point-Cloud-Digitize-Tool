@@ -14,14 +14,24 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         layout = self.layout
         scene = context.scene
         
-        layout.operator("wm.las_open", text="Import Point Cloud")
-        layout.operator("custom.export_to_shapefile", text="Export Shapefile")  
         row = layout.row(align=True)
-        row.prop(scene, "points_percentage")
+        row.operator("wm.las_open", text="Import point cloud")
+        row.prop(scene, "ground_only")
+
+        row = layout.row(align=True)
+        row.prop(scene, "sparsity_value")
         row.prop(scene, "z_height_cut_off")
-        layout.operator("custom.center_pointcloud", text="Center Point Cloud")
+        
         row = layout.row(align=True)
-        row.operator("custom.create_point_cloud_object", text="Create Point Cloud object")
+        row.operator("custom.export_to_shapefile", text="Export shapefile")  
+        row.prop(scene, "points_percentage")
+        
+        row_text = self.layout.row(align=True)
+        row_text.label(text="                                     Tools")
+        
+        layout.operator("custom.create_point_cloud_object", text="Create point cloud object")
+        row = layout.row(align=True)
+        row.operator("custom.center_pointcloud", text="Center point cloud")
         row.operator("custom.remove_point_cloud", text="Remove point cloud")
         
         row = layout.row(align=True)
@@ -34,16 +44,15 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row.prop(scene, "extra_z_height")
         row.prop(scene, "marking_transparency")
        
- 
         row_text = self.layout.row(align=True)
         row_text.label(text="                                     Markers")
         
         row = layout.row(align=True)
         row.operator("view3d.mark_fast", text="Simple marker")
         row.operator("view3d.mark_complex", text="Complex marker")
-        layout.operator("view3d.selection_detection", text="Selection Marker")
+        layout.operator("view3d.selection_detection", text="Selection marker")
         row = layout.row()
-        row.operator("custom.find_all_road_marks", text="Auto Mark")
+        row.operator("custom.find_all_road_marks", text="Auto mark")
         row.prop(scene, "markings_threshold")
         
         row = layout.row(align=True)
@@ -62,17 +71,22 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row = layout.row()
         row.operator("custom.mark_snapping_line", text="Line marker") 
         row.operator("custom.auto_curved_line", text="Auto line marker") 
+       
         layout.operator("custom.dashed_line_marking_operator", text="Dash marker") 
         layout.operator("custom.curb_detection_operator", text="Curb marker") 
+        
+        row_text = self.layout.row(align=True)
+        row_text.label(text="                                     Options")
         
         row = layout.row()
         row.prop(scene, "save_shape") 
         row = layout.row()
         row.prop(scene, "show_dots")
-        row = layout.row()
-        
+
          #Dummy space
-        for _ in range(5): 
+        for _ in range(10): 
             layout.label(text="")   
+            
+            
              
             

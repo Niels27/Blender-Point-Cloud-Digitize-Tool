@@ -17,16 +17,24 @@ To save time, it has Auto load auto.laz function, this will quickly imports a la
 Installing Libraries: full script.py has functions to install multiple libraries at once. Alternatively use: from pip._internal import main, main(['install','libraryname']) in blender console.
 
 Manual import takes 1-3 minutes first time, but ~70% faster subsequent times. 
-Export to shapefile can take couple minutes. Lower points percentage to ~10% to speed it up. 
+
 
 
 FUNCTIONS
 ----------------------------------------------------------------------------------------------------------------
-! important ! press ESC key to stop the operators. Be careful left-clicking around while an operator is active !
+! important ! press ESC key to stop the operators. Be careful left-clicking around while an operator is active, they can stack !
 
-Points percentage: changes the displayed point amount to help performance, does NOT modify the amount of points. It DOES affect points exported to shapefile.
+Import point cloud: Opens file explorer, works with .las or .laz file only.
 
-max z: cuts off height (meters) from ground level, since we only need roads. Set to 0 to not cut. Improves performance a lot. (Recommended 0.5)
+Ground only: enable to use classification 2 only (if it exists), which will import only the ground points. This saves a lot of time and drastically reduces file sizes.
+
+Export to shapefile: export loaded pointcloud to shp file. 
+
+Points percentage: changes the amount of points exported to shapefile. Above 20 is very slow!
+
+Sparsity: set the sparsity of the pointcloud from 0.01-1, recommended 0.2-0.3 to improve speed and performance.
+
+Max z: cuts off height (meters) from ground level, since we only need roads. Set to 0 to not cut. Improves performance a lot, use this if ground only does not work.
 
 Center point cloud: Centers point cloud in viewport.
 
@@ -34,7 +42,8 @@ Create Point Cloud Object: creates a blender object of the cloud. If BlenderGIS 
 
 Click Info: prints useful info of every left mouseclick in viewport.
 
-Intensity threshold: this needs to be changed constantly, since every point cloud is different, and some road marks are less white (intensity) than others. ~140 for vague road marks, ~160 for normal, ~200 for bright ones. Too high-> wont detect, Too low-> region growing will leave the road mark. (is bad, blender might freeze for a while)
+Intensity threshold: this needs to be changed constantly, since every point cloud is different, and some road marks are less white (intensity) than others. 100-140 for vague road marks, ~150-170 for normal, 180-200 for bright ones. 
+a pop up will warn the user if the difference is bigger than 50, and suggest adjusting it
 
 Marking height: height of all drawn shapes, 0 could mean they are harder to see.
 

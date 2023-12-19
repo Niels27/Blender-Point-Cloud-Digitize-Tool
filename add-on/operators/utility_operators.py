@@ -39,7 +39,7 @@ class LAS_OT_OpenOperator(bpy.types.Operator):
         points_percentage=bpy.context.scene.points_percentage
         z_height_cut_off=bpy.context.scene.z_height_cut_off
         pointcloud_data = GetPointCloudData()
-        pointcloud_data.pointcloud_load_optimized(self.filepath, point_size, sparsity_value,points_percentage,z_height_cut_off)
+        pointcloud_data.pointcloud_load_optimized(self.filepath, point_size, sparsity_value,z_height_cut_off)
         print("Opened LAS/LAZ file: ", self.filepath,"in %s seconds" % (time.time() - start_time))
         return {'FINISHED'}
 

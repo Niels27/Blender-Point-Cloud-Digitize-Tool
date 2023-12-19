@@ -74,10 +74,8 @@ def register():
     
     bpy.types.Scene.point_size = IntProperty(name="POINT SIZE",
                                       default=1)
-    bpy.types.Scene.sparsity_value = IntProperty(name="SPARSITY VALUE",
-                                      default=1)
     bpy.types.Scene.intensity_threshold = bpy.props.FloatProperty(
-        name="Intensity Threshold",
+        name="Intensity threshold",
         description="Minimum intensity threshold",
         default=160,  #Default value
         min=0,#Minimum value
@@ -93,11 +91,19 @@ def register():
         subtype='UNSIGNED' 
     )
     bpy.types.Scene.points_percentage = bpy.props.IntProperty(
-        name="Points %:",
-        description="Percentage of points rendered",
-        default=25,  #Default value
+        name="Point %:",
+        description="Percentage of points to export",
+        default=2,  #Default value
         min=1, #Minimum value
         max=100, #Max value  
+        subtype='UNSIGNED' 
+    )
+    bpy.types.Scene.sparsity_value = bpy.props.FloatProperty(
+        name="Sparsity:",
+        description="sparsity of points rendered",
+        default=0.2,  #Default value
+        min=0.01, #Minimum value
+        max=1, #Max value  
         subtype='UNSIGNED' 
     )
     bpy.types.Scene.fatline_width = bpy.props.FloatProperty(
@@ -108,7 +114,7 @@ def register():
         subtype='NONE'     
     )
     bpy.types.Scene.marking_color = bpy.props.FloatVectorProperty(
-        name="Marking Color",
+        name="Marking color",
         subtype='COLOR',
         description="Select Marking color",
         default=(1, 0, 0, 1),  #Default is red
@@ -117,7 +123,7 @@ def register():
         
     )
     bpy.types.Scene.marking_color = bpy.props.FloatVectorProperty(
-        name="Marking Color",
+        name="Marking color",
         subtype='COLOR',
         description="Select Marking color",
         default=(1, 0, 0, 1),  #Default is red
@@ -135,31 +141,31 @@ def register():
     description="Stores the result from the user input pop-up",
 )
     bpy.types.Scene.save_shape = bpy.props.BoolProperty(
-        name="Save Shapes",
+        name="Save shapes",
         description="Saves an image after marking a shape",
         default=False,
         subtype='UNSIGNED'  
     )
-    bpy.types.Scene.auto_load = bpy.props.BoolProperty(
-        name="Auto load auto.laz",
-        description="Auto loads auto.laz on every exectuion",
-        default=False,
-        subtype='UNSIGNED'  
-    )
     bpy.types.Scene.show_dots = bpy.props.BoolProperty(
-        name="Show Dots",
+        name="Show dots",
         description="Toggle showing feedback dots",
         default=True,
         subtype='UNSIGNED'  
     )
+    bpy.types.Scene.ground_only = bpy.props.BoolProperty(
+        name="Ground only",
+        description="Toggle loading points from ground classification only",
+        default=False,
+        subtype='UNSIGNED'  
+    )
     bpy.types.Scene.z_height_cut_off = bpy.props.FloatProperty(
         name="Max height",
-        description="Height to cut off from ground level",
-        default=0.5,
+        description="Height to cut off from ground level, 0 to not cut",
+        default=0,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.extra_z_height = bpy.props.FloatProperty(
-        name="Marking Height",
+        name="Marking height",
         description="Extra height of all markings compared to the ground level",
         default=0.01,
         subtype='UNSIGNED'  
@@ -207,13 +213,13 @@ def unregister():
     del bpy.types.Scene.fatline_width
     del bpy.types.Scene.user_input_result
     del bpy.types.Scene.save_shape
-    del bpy.types.Scene.auto_load
     del bpy.types.Scene.show_dots
     del bpy.types.Scene.snap_to_road_mark
     del bpy.types.Scene.z_height_cut_off
     del bpy.types.Scene.extra_z_height
     del bpy.types.Scene.points_percentage
-     
+    del bpy.types.Scene.sparsity_value
+    del bpy.types.Scene.ground_only
                  
 if __name__ == "__main__":
     register()

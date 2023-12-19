@@ -31,7 +31,6 @@ def install_libraries(library_list):
                           
 #install_libraries()    
 
-
 #imports
 import bpy
 from bpy import context
@@ -95,10 +94,9 @@ class LAS_OT_OpenOperator(bpy.types.Operator):
         bpy.context.scene["Filepath to the loaded pointcloud"] = self.filepath
         sparsity_value = bpy.context.scene.sparsity_value
         point_size = bpy.context.scene.point_size
-        points_percentage=bpy.context.scene.points_percentage
         z_height_cut_off=bpy.context.scene.z_height_cut_off
         pointcloud_data = GetPointCloudData()
-        pointcloud_data.pointcloud_load_optimized(self.filepath, point_size, sparsity_value,points_percentage,z_height_cut_off)
+        pointcloud_data.pointcloud_load_optimized(self.filepath, point_size, sparsity_value,z_height_cut_off)
         print("Opened LAS/LAZ file: ", self.filepath,"in %s seconds" % (time.time() - start_time))
         return {'FINISHED'}
 
@@ -1715,7 +1713,7 @@ class DashedLineMarkingOperator(bpy.types.Operator):
 
         #Combine medians to form the median point
         median_point = Vector((median_x, median_y, median_z))
-        mark_point(median_point, "dash line center")
+        mark_point(median_point, "dash line center",size=0.1)
 
         return median_point
 
@@ -1775,7 +1773,7 @@ class DashedLineMarkingOperator(bpy.types.Operator):
                 print("No more clusters found")
                 break  #No more clusters found terminate the search
             
-            mark_point(new_cluster_center, "dash line center")
+            mark_point(new_cluster_center, "dash line center",size=0.1)
 
             #Connect the previous cluster center to the new cluster center
             self.connect_clusters(end_cluster_center, new_cluster_center)
@@ -1958,7 +1956,7 @@ class GetPointCloudData:
         return cls._instance
     
     #Function to load the point cloud, store it's data and draw it using openGL, optimized version
-    def pointcloud_load_optimized(self,path, point_size, sparsity_value,points_percentage,z_height_cut_off):
+    def pointcloud_load_optimized(self,path, point_size, sparsity_value,z_height_cut_off):
         
         start_time = time.time()
         print("Started loading point cloud.."),
@@ -1971,7 +1969,7 @@ class GetPointCloudData:
         if blend_file_path:
             directory = os.path.dirname(blend_file_path)
         else:
-        # Prompt the user to save the file first 
+        #Prompt the user to save the file first 
             print("please save blender project first!")
             return
         directory = os.path.dirname(blend_file_path)
@@ -1988,9 +1986,29 @@ class GetPointCloudData:
             os.mkdir(stored_data_path)
         
         if not os.path.exists(os.path.join(stored_data_path, file_name_points)):
-            point_cloud = lp.read(path)
-            points_a = np.vstack((point_cloud.x, point_cloud.y, point_cloud.z)).transpose()
-            colors_a = np.vstack((point_cloud.red, point_cloud.green, point_cloud.blue)).transpose() / 65535
+            
+            point_cloud = lp.read(path) 
+            ground_code = 2 #the ground is usually 2
+
+            print(f"Using classification code for GROUND: {ground_code}")
+            use_ground_points_only=bpy.context.scene.ground_only
+            if use_ground_points_only:
+                # Filter points based on classification
+                ground_points_mask = point_cloud.classification == ground_code
+                if ground_points_mask.any():
+                    # Applying the ground points mask
+                    points_a = np.vstack((point_cloud.x[ground_points_mask], 
+                                        point_cloud.y[ground_points_mask], 
+                                        point_cloud.z[ground_points_mask])).transpose()
+                    colors_a = np.vstack((point_cloud.red[ground_points_mask], 
+                                        point_cloud.green[ground_points_mask], 
+                                        point_cloud.blue[ground_points_mask])).transpose() / 65535
+                else:
+                    print("classification ", ground_code, " not found")
+            else: 
+                points_a = np.vstack((point_cloud.x, point_cloud.y, point_cloud.z)).transpose()
+                colors_a = np.vstack((point_cloud.red, point_cloud.green, point_cloud.blue)).transpose() / 65535
+                
             #Convert points to float32
             points_a = points_a.astype(np.float32)
             #Convert colors to uint8
@@ -2041,22 +2059,15 @@ class GetPointCloudData:
         
         print("point cloud loaded in: ", time.time() - start_time)
         
-        if sparsity_value == 1 and points_percentage<100: 
-            #Calculate sparsity value based on the desired percentage
-            desired_sparsity = int(1 / (points_percentage / 100))
+        step = int(1 / sparsity_value)
 
-            #Evenly sample points based on the calculated sparsity
-            reduced_indices = range(0, len(points_a), desired_sparsity)
-            reduced_points = points_a[reduced_indices]
-            reduced_colors = colors_a[reduced_indices]
-        else:
-            #Evenly sample points using the provided sparsity value
-            reduced_points = points_a[::sparsity_value]
-            reduced_colors = colors_a[::sparsity_value]
+        #Evenly sample points using the provided sparsity value
+        reduced_points = points_a[::step]
+        reduced_colors = colors_a[::step]
             
         #Save json file of point cloud data
         if save_json:
-            export_as_json(reduced_points,reduced_colors,JSON_data_path,point_cloud_name,points_percentage)
+            export_as_json(reduced_points,reduced_colors,JSON_data_path,point_cloud_name)
   
         #Function to save KD-tree with pickle and gzip
         def save_kdtree_pickle_gzip(file_path, kdtree):
@@ -2138,7 +2149,7 @@ class GetPointCloudData:
                 view3d.region_3d.view_location = (bbox_center[0], bbox_center[1], camera_height)  #X, Y, z meters height
                 #view3d.region_3d.view_rotation = bpy.context.scene.camera.rotation_euler  #Maintaining the current rotation
                 view3d.region_3d.view_distance = camera_height  #Distance from the view point
-                print("openGL point cloud drawn in:",time.time() - start_time,"using ",points_percentage," percent of points (",len(reduced_points),") points") 
+                print("openGL point cloud drawn in:",time.time() - start_time,"using ",sparsity_value*100," percent of points (",len(reduced_points),") points") 
                 
             else:
                 print("Draw handler already exists, skipping drawing")
@@ -2355,9 +2366,9 @@ def export_as_shapefile(points,points_percentage=100,epsg_value=28992):
     print("saved shapefile to: ",shapefile_dir," in: ",time.time()-start_time)
 
 #Function to export point cloud as JSON    
-def export_as_json(point_coords,point_colors,JSON_data_path,point_cloud_name,points_percentage):
+def export_as_json(point_coords,point_colors,JSON_data_path,point_cloud_name):
     start_time = time.time()
-    print("exporting point cloud data as JSON with",points_percentage, "percent of points")
+    print("exporting point cloud data as JSON")
     #Adjusting the structure to match the expected format
     point_cloud_data = [
         {
@@ -3551,7 +3562,7 @@ class LAS_OT_AutoOpenOperator(bpy.types.Operator):
         z_height_cut_off=bpy.context.scene.z_height_cut_off
         print("Opening LAS file:", auto_las_file_path)
         pointcloud_data = GetPointCloudData()
-        pointcloud_data.pointcloud_load_optimized(auto_las_file_path, point_size, sparsity_value,points_percentage,z_height_cut_off)
+        pointcloud_data.pointcloud_load_optimized(auto_las_file_path, point_size, sparsity_value,z_height_cut_off)
         print("Finished opening LAS file:", auto_las_file_path)
         return {'FINISHED'}
         
@@ -3569,14 +3580,24 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         layout = self.layout
         scene = context.scene
         
-        layout.operator("wm.las_open", text="Import Point Cloud")
-        layout.operator("custom.export_to_shapefile", text="Export Shapefile")  
         row = layout.row(align=True)
-        row.prop(scene, "points_percentage")
+        row.operator("wm.las_open", text="Import point cloud")
+        row.prop(scene, "ground_only")
+
+        row = layout.row(align=True)
+        row.prop(scene, "sparsity_value")
         row.prop(scene, "z_height_cut_off")
-        layout.operator("custom.center_pointcloud", text="Center Point Cloud")
+        
         row = layout.row(align=True)
-        row.operator("custom.create_point_cloud_object", text="Create Point Cloud object")
+        row.operator("custom.export_to_shapefile", text="Export shapefile")  
+        row.prop(scene, "points_percentage")
+        
+        row_text = self.layout.row(align=True)
+        row_text.label(text="                                     Tools")
+        
+        layout.operator("custom.create_point_cloud_object", text="Create point cloud object")
+        row = layout.row(align=True)
+        row.operator("custom.center_pointcloud", text="Center point cloud")
         row.operator("custom.remove_point_cloud", text="Remove point cloud")
         
         row = layout.row(align=True)
@@ -3589,16 +3610,15 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row.prop(scene, "extra_z_height")
         row.prop(scene, "marking_transparency")
        
- 
         row_text = self.layout.row(align=True)
         row_text.label(text="                                     Markers")
         
         row = layout.row(align=True)
         row.operator("view3d.mark_fast", text="Simple marker")
         row.operator("view3d.mark_complex", text="Complex marker")
-        layout.operator("view3d.selection_detection", text="Selection Marker")
+        layout.operator("view3d.selection_detection", text="Selection marker")
         row = layout.row()
-        row.operator("custom.find_all_road_marks", text="Auto Mark")
+        row.operator("custom.find_all_road_marks", text="Auto mark")
         row.prop(scene, "markings_threshold")
         
         row = layout.row(align=True)
@@ -3617,9 +3637,12 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row = layout.row()
         row.operator("custom.mark_snapping_line", text="Line marker") 
         row.operator("custom.auto_curved_line", text="Auto line marker") 
-        layout.operator("custom.curb_detection_operator", text="Curb marker") 
+       
         layout.operator("custom.dashed_line_marking_operator", text="Dash marker") 
         layout.operator("custom.curb_detection_operator", text="Curb marker") 
+        
+        row_text = self.layout.row(align=True)
+        row_text.label(text="                                     Options")
         
         row = layout.row()
         row.prop(scene, "auto_load")
@@ -3627,10 +3650,9 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row.prop(scene, "save_shape") 
         row = layout.row()
         row.prop(scene, "show_dots")
-        row = layout.row()
-        
+
          #Dummy space
-        for _ in range(5): 
+        for _ in range(10): 
             layout.label(text="")   
             
             
@@ -3666,10 +3688,8 @@ def register():
     
     bpy.types.Scene.point_size = IntProperty(name="POINT SIZE",
                                       default=1)
-    bpy.types.Scene.sparsity_value = IntProperty(name="SPARSITY VALUE",
-                                      default=1)
     bpy.types.Scene.intensity_threshold = bpy.props.FloatProperty(
-        name="Intensity Threshold",
+        name="Intensity threshold",
         description="Minimum intensity threshold",
         default=160,  #Default value
         min=0,#Minimum value
@@ -3685,11 +3705,19 @@ def register():
         subtype='UNSIGNED' 
     )
     bpy.types.Scene.points_percentage = bpy.props.IntProperty(
-        name="Points %:",
-        description="Percentage of points rendered",
-        default=30,  #Default value
+        name="Point %:",
+        description="Percentage of points to export",
+        default=2,  #Default value
         min=1, #Minimum value
         max=100, #Max value  
+        subtype='UNSIGNED' 
+    )
+    bpy.types.Scene.sparsity_value = bpy.props.FloatProperty(
+        name="Sparsity:",
+        description="sparsity of points rendered",
+        default=0.2,  #Default value
+        min=0.01, #Minimum value
+        max=1, #Max value  
         subtype='UNSIGNED' 
     )
     bpy.types.Scene.fatline_width = bpy.props.FloatProperty(
@@ -3700,7 +3728,7 @@ def register():
         subtype='NONE'     
     )
     bpy.types.Scene.marking_color = bpy.props.FloatVectorProperty(
-        name="Marking Color",
+        name="Marking color",
         subtype='COLOR',
         description="Select Marking color",
         default=(1, 0, 0, 1),  #Default is red
@@ -3709,7 +3737,7 @@ def register():
         
     )
     bpy.types.Scene.marking_color = bpy.props.FloatVectorProperty(
-        name="Marking Color",
+        name="Marking color",
         subtype='COLOR',
         description="Select Marking color",
         default=(1, 0, 0, 1),  #Default is red
@@ -3727,7 +3755,7 @@ def register():
     description="Stores the result from the user input pop-up",
 )
     bpy.types.Scene.save_shape = bpy.props.BoolProperty(
-        name="Save Shapes",
+        name="Save shapes",
         description="Saves an image after marking a shape",
         default=False,
         subtype='UNSIGNED'  
@@ -3739,19 +3767,25 @@ def register():
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.show_dots = bpy.props.BoolProperty(
-        name="Show Dots",
+        name="Show dots",
         description="Toggle showing feedback dots",
         default=True,
         subtype='UNSIGNED'  
     )
+    bpy.types.Scene.ground_only = bpy.props.BoolProperty(
+        name="Ground only",
+        description="Toggle loading points from ground classification only",
+        default=False,
+        subtype='UNSIGNED'  
+    )
     bpy.types.Scene.z_height_cut_off = bpy.props.FloatProperty(
         name="Max height",
-        description="Height to cut off from ground level",
-        default=0.5,
+        description="Height to cut off from ground level, 0 to not cut",
+        default=0,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.extra_z_height = bpy.props.FloatProperty(
-        name="Marking Height",
+        name="Marking height",
         description="Extra height of all markings compared to the ground level",
         default=0.01,
         subtype='UNSIGNED'  
@@ -3806,6 +3840,8 @@ def unregister():
     del bpy.types.Scene.z_height_cut_off
     del bpy.types.Scene.extra_z_height
     del bpy.types.Scene.points_percentage
+    del bpy.types.Scene.sparsity_value
+    del bpy.types.Scene.ground_only
     
                  
 if __name__ == "__main__":
