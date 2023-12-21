@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js ASCII Point Cloud Viewer</title>
+    <style>
+        body {
+            margin: 0;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <script type="module">
+        import * as THREE from 'https://cdn.skypack.dev/three@0.128.0';
+        import { OrbitControls } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/controls/OrbitControls.js';
+
+        //scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 10000);
+        camera.position.set(0, 0, 100);
+        camera.lookAt(new THREE.Vector3(0, 0, 0));
+        const ambientLight = new THREE.AmbientLight(0xffffff);
+        scene.add(ambientLight);
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setClearColor(0xAAAAAA);
+        renderer.domElement.addEventListener('click', onDocumentMouseClick, false);
+        document.body.appendChild(renderer.domElement);
+
+        //websocket setup
+        const socket = new WebSocket('ws://localhost:8765');
+        socket.onopen = function(e) {
+            console.log("Connection established");
+        };
+
+        socket.onmessage = function(event) {
+            console.log(`Data received from server: ${event.data}`);
+        };
+
+        // Animate the scene
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        //function to load an ascii file, parse it and add it to the scene
+        function loadASCIIPointCloud(url) {
+            fetch(url)
+                .then(response => response.text())
+                .then(text => {
+
+                    const geometry = new THREE.BufferGeometry();
+                    const vertices = [];
+                    const colors = [];
+                    let firstPoint = null;
+                    const lines = text.split('\n');
+                    
+                    for (let line of lines) {
+                        const parts = line.trim().split(/\s+/);
+                        if (parts.length === 3 || parts.length === 6) {
+                            // Parse XYZ coordinates
+                            const x = parseFloat(parts[0]);
+                            const y = parseFloat(parts[1]);
+                            const z = parseFloat(parts[2]);
+                            vertices.push(x, y, z);
+
+                            if (parts.length === 6) {
+                                // Parse RGB colors (assuming they are in 0-65535 range)
+                                const r = parseInt(parts[3]) / 65535;
+                                const g = parseInt(parts[4]) / 65535;
+                                const b = parseInt(parts[5]) / 65535;
+                                colors.push(r, g, b);
+                            } else {
+                                // Default color if no RGB provided
+                                colors.push(0, 0, 1); // blue color
+                            }
+
+                            if (!firstPoint) {
+                                firstPoint = new THREE.Vector3(x, y, z);
+                            }
+                        }
+                    }
+
+                    //console.log("Sample vertices:", vertices.slice(0, 9)); // Log some vertices
+                    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+                    //const material = new THREE.PointsMaterial({ size: 0.01, color: 0x0000ff });
+                    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                    const material = new THREE.PointsMaterial({ size: 0.01, vertexColors: true });
+                    const pointCloud = new THREE.Points(geometry, material);
+                    scene.add(pointCloud);
+
+                    // Set camera to look at the first point
+                    if (firstPoint) {
+                        const x = firstPoint.x
+                        const y = firstPoint.y
+                        const z = firstPoint.z
+                        // Set camera to look at the first point
+                        camera.position.set(x, y, 30); // Adjust based on the point cloud's bounds
+                        camera.lookAt(new THREE.Vector3(x, y, z));
+                        console.log("first point:", firstPoint);
+                        const controls = new OrbitControls(camera, renderer.domElement);
+                        //create a grid and move it over to the point cloud
+                        const gridHelper = new THREE.GridHelper(1000, 1000);
+                        gridHelper.position.set(x, y, z);
+                        gridHelper.rotation.x = Math.PI / 2;
+                        scene.add(gridHelper);
+                        controls.target.set(x, y, z); // Set to the center of the point cloud
+                        controls.update();
+
+                    }
+                });
+        }
+        //function to handle mouse clicks
+        function onDocumentMouseClick(event) {
+            event.preventDefault();
+
+            // Calculate mouse position in normalized device coordinates (-1 to +1) for both components
+            mouse.x = (event.clientX / renderer.domElement.clientWidth) * 2 - 1;
+            mouse.y = -(event.clientY / renderer.domElement.clientHeight) * 2 + 1;
+
+            // Update the picking ray with the camera and mouse position
+            raycaster.setFromCamera(mouse, camera);
+
+            // Calculate objects intersecting the picking ray
+            const intersects = raycaster.intersectObjects(scene.children);
+
+            if (intersects.length > 0) {
+                // Assuming the first intersected object is the point cloud
+                const closestPoint = intersects[0].point;
+                console.log("Clicked coordinates:", closestPoint);
+
+                // Send the coordinates to the WebSocket server
+                socket.send(JSON.stringify({ x: closestPoint.x, y: closestPoint.y, z: closestPoint.z }));
+            }
+        }
+
+        let point_cloud_path = 'pointclouds/pointcloud.txt'
+        loadASCIIPointCloud(point_cloud_path);
+
+    </script>
+</body>
+
+</html>
