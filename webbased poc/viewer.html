@@ -18,6 +18,8 @@
     <script type="module">
         import * as THREE from 'https://cdn.skypack.dev/three@0.128.0';
         import { OrbitControls } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/controls/OrbitControls.js';
+        import { MTLLoader } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/loaders/MTLLoader.js';
+        import { OBJLoader } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/loaders/OBJLoader.js';
 
         //scene setup
         const scene = new THREE.Scene();
@@ -42,9 +44,26 @@
 
         socket.onmessage = function(event) {
             console.log(`Data received from server: ${event.data}`);
+            if (event.data === "new_shape_available") {
+                loadShapeFromOBJ("shape objects/shape.obj", "shape objects/shape.mtl");
+            }
         };
 
-        // Animate the scene
+        //Function to load the shape from OBJ and MTL files
+        function loadShapeFromOBJ(objPath, mtlPath) {
+            new MTLLoader()
+                .load(mtlPath, function(materials) {
+                    materials.preload();
+                    new OBJLoader()
+                        .setMaterials(materials)
+                        .load(objPath, function(object) {
+                            scene.add(object);  
+                            object.position.set(0, 0, 0);//Add the loaded object to the scene
+                        });
+                });
+}
+
+        //Animate the scene
         function animate() {
             requestAnimationFrame(animate);
             renderer.render(scene, camera);
@@ -60,89 +79,96 @@
                     const geometry = new THREE.BufferGeometry();
                     const vertices = [];
                     const colors = [];
-                    let firstPoint = null;
+                    let centroid = new THREE.Vector3(0, 0, 0);
+                    let pointCount = 0;
+
                     const lines = text.split('\n');
-                    
                     for (let line of lines) {
                         const parts = line.trim().split(/\s+/);
                         if (parts.length === 3 || parts.length === 6) {
-                            // Parse XYZ coordinates
+                            //Parse XYZ coordinates
                             const x = parseFloat(parts[0]);
                             const y = parseFloat(parts[1]);
                             const z = parseFloat(parts[2]);
-                            vertices.push(x, y, z);
 
-                            if (parts.length === 6) {
-                                // Parse RGB colors (assuming they are in 0-65535 range)
-                                const r = parseInt(parts[3]) / 65535;
-                                const g = parseInt(parts[4]) / 65535;
-                                const b = parseInt(parts[5]) / 65535;
-                                colors.push(r, g, b);
-                            } else {
-                                // Default color if no RGB provided
-                                colors.push(0, 0, 1); // blue color
-                            }
+                            if (!isNaN(x) && !isNaN(y) && !isNaN(z)) {
+                                vertices.push(x, y, z); //Temporarily store the original coordinates
+                                centroid.add(new THREE.Vector3(x, y, z));
+                                pointCount++;
 
-                            if (!firstPoint) {
-                                firstPoint = new THREE.Vector3(x, y, z);
+                                //Parse RGB colors if available
+                                if (parts.length === 6) {
+                                    const r = parseInt(parts[3]) / 65535;
+                                    const g = parseInt(parts[4]) / 65535;
+                                    const b = parseInt(parts[5]) / 65535;
+                                    colors.push(r, g, b);
+                                } else {
+                                    colors.push(0, 0, 1); //Default color: blue
+                                }
                             }
                         }
                     }
 
-                    //console.log("Sample vertices:", vertices.slice(0, 9)); // Log some vertices
-                    geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
-                    //const material = new THREE.PointsMaterial({ size: 0.01, color: 0x0000ff });
+                    // Calculate the centroid
+                    centroid.divideScalar(pointCount);
+
+                    // Adjust each point's position relative to the centroid
+                    const adjustedVertices = [];
+                    for (let i = 0; i < vertices.length; i += 3) {
+                        adjustedVertices.push(vertices[i] - centroid.x);
+                        adjustedVertices.push(vertices[i + 1] - centroid.y);
+                        adjustedVertices.push(vertices[i + 2] - centroid.z);
+                    }
+
+                    geometry.setAttribute('position', new THREE.Float32BufferAttribute(adjustedVertices, 3));
                     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
                     const material = new THREE.PointsMaterial({ size: 0.01, vertexColors: true });
                     const pointCloud = new THREE.Points(geometry, material);
+
                     scene.add(pointCloud);
 
-                    // Set camera to look at the first point
-                    if (firstPoint) {
-                        const x = firstPoint.x
-                        const y = firstPoint.y
-                        const z = firstPoint.z
-                        // Set camera to look at the first point
-                        camera.position.set(x, y, 30); // Adjust based on the point cloud's bounds
-                        camera.lookAt(new THREE.Vector3(x, y, z));
-                        console.log("first point:", firstPoint);
-                        const controls = new OrbitControls(camera, renderer.domElement);
-                        //create a grid and move it over to the point cloud
-                        const gridHelper = new THREE.GridHelper(1000, 1000);
-                        gridHelper.position.set(x, y, z);
-                        gridHelper.rotation.x = Math.PI / 2;
-                        scene.add(gridHelper);
-                        controls.target.set(x, y, z); // Set to the center of the point cloud
-                        controls.update();
+                    // Set up camera and controls
+                    camera.position.set(0, 0, 30);
+                    camera.lookAt(new THREE.Vector3(0, 0, 0));
+                    const controls = new OrbitControls(camera, renderer.domElement);
+                    controls.target.set(0, 0, 0); 
+                    controls.update();
 
-                    }
+                    // Add a grid helper centered at the origin
+                    const gridHelper = new THREE.GridHelper(1000, 1000);
+                    gridHelper.rotation.x = Math.PI / 2;
+                    scene.add(gridHelper);
+
+                    
                 });
         }
+
         //function to handle mouse clicks
         function onDocumentMouseClick(event) {
             event.preventDefault();
 
-            // Calculate mouse position in normalized device coordinates (-1 to +1) for both components
+            //Calculate mouse position 
             mouse.x = (event.clientX / renderer.domElement.clientWidth) * 2 - 1;
             mouse.y = -(event.clientY / renderer.domElement.clientHeight) * 2 + 1;
 
-            // Update the picking ray with the camera and mouse position
+            //Update the picking ray with the camera and mouse position
             raycaster.setFromCamera(mouse, camera);
 
-            // Calculate objects intersecting the picking ray
-            const intersects = raycaster.intersectObjects(scene.children);
+            //Assume a plane at z = 0 
+            const planeZ = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+            const targetPoint = new THREE.Vector3();
+            raycaster.ray.intersectPlane(planeZ, targetPoint);
 
-            if (intersects.length > 0) {
-                // Assuming the first intersected object is the point cloud
-                const closestPoint = intersects[0].point;
-                console.log("Clicked coordinates:", closestPoint);
+            console.log("Clicked coordinates in 3D space:", targetPoint);
 
-                // Send the coordinates to the WebSocket server
-                socket.send(JSON.stringify({ x: closestPoint.x, y: closestPoint.y, z: closestPoint.z }));
+            //Send the coordinates to the WebSocket server
+            if (targetPoint) {
+                socket.send(JSON.stringify({ x: targetPoint.x, y: targetPoint.y, z: targetPoint.z }));
             }
         }
 
         let point_cloud_path = 'pointclouds/pointcloud.txt'
+        loadShapeFromOBJ("shape objects/shape.obj", "shape objects/shape.mtl")
         loadASCIIPointCloud(point_cloud_path);
 
     </script>
