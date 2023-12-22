@@ -335,7 +335,7 @@ class CreatePointCloudObjectOperator(bpy.types.Operator):
         mesh.materials[0] = material
       else:
         mesh.materials.append(material)
-      store_object_state(obj)  
+      prepare_object_for_export(obj)  
       return obj 
    
     def execute(self, context):
@@ -477,7 +477,7 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
         material = bpy.data.materials.new(name="Line Material")
         material.diffuse_color = marking_color
         obj.data.materials.append(material)
-        store_object_state(obj)
+        prepare_object_for_export(obj)
         self.prev_end_point = coord_3d_end
 
         #Create a rectangle object on top of the line
@@ -1057,7 +1057,7 @@ class SelectionDetectionOpterator(bpy.types.Operator):
         mesh.from_pydata(verts, edges, [])
         mesh.update()
         
-        store_object_state(obj)
+        prepare_object_for_export(obj)
 
         TriangleMarkOperator ._is_running = False  #Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  #Debug message
@@ -2277,7 +2277,7 @@ def save_kdtree_to_file(file_path, kdtree):
     print("saved kdtree to",file_path)
 
 #Function to store obj state
-def store_object_state(obj):
+def prepare_object_for_export(obj):
 
     #bpy.ops.object.mode_set(mode='OBJECT')
     bpy.context.view_layer.objects.active = obj  #Set as active object
@@ -2288,20 +2288,25 @@ def store_object_state(obj):
     save_shape_checkbox = bpy.context.scene.save_shape
     if(save_shape_checkbox):
         save_shape_as_image(obj)
-    #Storing object state
-    obj_state = {
-        'name': obj.name,
-        'location': obj.location.copy(),
-        'rotation': obj.rotation_euler.copy(),
-        'scale': obj.scale.copy(),
-        'mesh': obj.data.copy() 
-    }
+
     save_obj_checkbox = bpy.context.scene.save_obj
     if(save_obj_checkbox):
         export_shape_as_obj(obj, obj.name)
         
 #Function to export objects as OBJ files 
 def export_shape_as_obj(obj, name):
+    
+    marking_color = bpy.context.scene.marking_color 
+    transparency = bpy.context.scene.marking_transparency
+    shape_material = bpy.data.materials.new(name="shape_material")
+    shape_material.diffuse_color = (marking_color[0], marking_color[1], marking_color[2], transparency)
+
+    # Assign the material to the object
+    if len(obj.data.materials) > 0:
+        obj.data.materials[0] = shape_material
+    else:
+        obj.data.materials.append(shape_material)
+        
     # Get the path of the current Blender file
     blend_file_path = bpy.data.filepath
     directory = os.path.dirname(blend_file_path)
@@ -2319,7 +2324,7 @@ def export_shape_as_obj(obj, name):
     obj.select_set(True)
 
     # Export the object to an OBJ file
-    bpy.ops.export_scene.obj(filepath=obj_file_path, use_selection=True)
+    bpy.ops.export_scene.obj(filepath=obj_file_path, use_selection=True,use_materials=True)
     
     # Deselect the object
     obj.select_set(False)
@@ -2762,7 +2767,7 @@ def create_shape(coords_list, shape_type,vertices=None,filter_coords=True):
             marking_color, transparency)
         
     print(f"Rendered {shape_type} shape in: {time.time() - start_time:.2f} seconds")
-    store_object_state(obj)
+    prepare_object_for_export(obj)
     
 #Function to create a mesh object
 def create_mesh_with_material(obj_name, shape_coords, marking_color, transparency):
@@ -2791,7 +2796,7 @@ def create_mesh_with_material(obj_name, shape_coords, marking_color, transparenc
     principled_node.inputs['Alpha'].default_value = transparency
 
     obj.data.materials.append(mat)
-    store_object_state(obj)
+    prepare_object_for_export(obj)
     return obj
 
 #Function to draw a line between two points with optional snapping
@@ -2922,7 +2927,7 @@ def create_rectangle_line_object(start, end):
     
     #Assign the material to the object
     obj.data.materials.append(material)
-    store_object_state(obj)
+    prepare_object_for_export(obj)
 
     return obj
 
@@ -3002,7 +3007,7 @@ def create_dots_shape(coords_list,name="Dots Shape", filter_points=True):
         
     obj.color = marking_color  #Set viewport display color 
     shape_counter+=1
-    store_object_state(obj)
+    prepare_object_for_export(obj)
     
 #Function to draw tiny marks on a given point
 def mark_point(point, name="point", size=0.05):
@@ -3048,7 +3053,7 @@ def create_triangle_outline(vertices):
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     
-    store_object_state(obj)
+    prepare_object_for_export(obj)
     return obj
 
 #Function to find nearby road marks and then snap the line, made out of 2 click points, to it

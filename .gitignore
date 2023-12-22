@@ -16,3 +16,4 @@ contours/
 shape objects/
 webbased poc/pointclouds/pointcloud.txt
 
+*.laz
