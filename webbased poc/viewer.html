@@ -93,7 +93,7 @@
         socket.onmessage = function(event) {
             console.log(`Data received from server: ${event.data}`);
             if (event.data === "new_shape_available") {
-                loadShapeFromOBJ("shape objects/shape.obj", "shape objects/shape.mtl");
+                loadShapeFromOBJ("objects/shape.obj", "objects/shape.mtl");
             }
         };
 
@@ -280,7 +280,7 @@
 
         let point_cloud_path = 'pointclouds/pointcloud.txt'
         loadASCIIPointCloud(point_cloud_path);
-        loadShapeFromOBJ("shape objects/shape.obj", "shape objects/shape.mtl")
+        loadShapeFromOBJ("objects/shape.obj", "objects/shape.mtl")
 
     </script>
 </body>
