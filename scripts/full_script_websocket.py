@@ -136,13 +136,16 @@ if bpy.context.scene.connect_socket:
     websocket_server_manager.restart_server()
 
 #Function to execute operators at given coordinates
-def execute_operators_at_coordinates(x,y,z):
+def execute_operators_at_coordinates(x,y,z,marker):
     
     #Create a Vector for the incoming coordinates 
     point = [x, y, z]
-    #bpy.ops.custom.mark_fixed_triangle(external_x=point[0], external_y=point[1], external_z=point[2])
-    bpy.ops.custom.mark_complex(external_x=point[0], external_y=point[1], external_z=point[2])
-    # Send message to webviewer after execution
+    if(marker=="triangle_marker"):
+        bpy.ops.custom.mark_fixed_triangle(external_x=point[0], external_y=point[1], external_z=point[2])
+    elif(marker=="complex_marker"):
+        bpy.ops.custom.mark_complex(external_x=point[0], external_y=point[1], external_z=point[2])
+    
+    #Send message back to webviewer after execution
     #asyncio.run(send_message_to_websocket("new_shape_available"))
     
 #Function to send data to the websocket
@@ -151,17 +154,18 @@ async def handle(websocket, path):
     active_websockets.add(websocket)
     try:
         while True:
-            data = await websocket.recv()
-            print(f"Received data: {data}")
+            message = await websocket.recv()
+            print(f"Received data: {message}")
             
             # Parse the JSON data
             try:
-                coords = json.loads(data)
-                if "x" in coords and "y" in coords and "z" in coords:
-                    print("Received data contains x,y,z coordinates")
-                    execute_operators_at_coordinates(coords["x"], coords["y"],coords["y"])
-                else:
-                    print("Received data is not in the correct format")
+                data = json.loads(message)  #Parse the JSON message
+                if "message" in data:  #Check if 'message' key exists
+                    msg_data = data["message"]  
+                    if all(k in msg_data for k in ("x", "y", "z", "type")):
+                        execute_operators_at_coordinates(msg_data["x"], msg_data["y"], msg_data["z"], msg_data["type"])
+                    else:
+                        print("Received data is not in the correct format")
             except json.JSONDecodeError:
                 print("Invalid data format")  
     finally:
@@ -2422,7 +2426,7 @@ def export_shape_as_obj(obj, name):
     # Export the object to an OBJ file
     bpy.ops.export_scene.obj(filepath=obj_file_path, use_selection=True)
     
-    save_obj_for_webviewer=True
+    save_obj_for_webviewer=False
     if(save_obj_for_webviewer):
         shapes_dir = os.path.join(directory, "webbased poc/shape objects")
         obj_file_path = os.path.join(shapes_dir, "shape.obj")

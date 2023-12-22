@@ -12,14 +12,31 @@
         canvas {
             display: block;
         }
+        
+        body { margin: 0; }
+        canvas { display: block; }
+        button {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            z-index: 10;
+        }
+        #complexShapeMarkerBtn {
+            top: 50px;
+        }
+</style>
     </style>
 </head>
 <body>
+    <button id="triangleMarkerBtn">Triangle Marker</button>
+    <button id="complexShapeMarkerBtn">Complex Shape Marker</button>
     <script type="module">
         import * as THREE from 'https://cdn.skypack.dev/three@0.128.0';
         import { OrbitControls } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/controls/OrbitControls.js';
         import { MTLLoader } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/loaders/MTLLoader.js';
         import { OBJLoader } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/loaders/OBJLoader.js';
+
+        let selectedMarkerType = '';
 
         //scene setup
         const scene = new THREE.Scene();
@@ -28,6 +45,8 @@
         camera.lookAt(new THREE.Vector3(0, 0, 0));
         const ambientLight = new THREE.AmbientLight(0xffffff);
         scene.add(ambientLight);
+        //var axesHelper = new THREE.AxesHelper(5);
+        //scene.add(axesHelper);
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
         const renderer = new THREE.WebGLRenderer();
@@ -48,20 +67,6 @@
                 loadShapeFromOBJ("shape objects/shape.obj", "shape objects/shape.mtl");
             }
         };
-
-        //Function to load the shape from OBJ and MTL files
-        function loadShapeFromOBJ(objPath, mtlPath) {
-            new MTLLoader()
-                .load(mtlPath, function(materials) {
-                    materials.preload();
-                    new OBJLoader()
-                        .setMaterials(materials)
-                        .load(objPath, function(object) {
-                            scene.add(object);  
-                            object.position.set(0, 0, 0);//Add the loaded object to the scene
-                        });
-                });
-}
 
         //Animate the scene
         function animate() {
@@ -142,6 +147,44 @@
                     
                 });
         }
+        //Function to load the shape from OBJ and MTL files
+        function loadShapeFromOBJ(objPath, mtlPath) {
+            new MTLLoader()
+                .load(mtlPath, function (materials) {
+                    materials.preload();
+                    new OBJLoader()
+                        .setMaterials(materials)
+                        .load(objPath, 
+                            function (object) {
+                                scene.add(object);
+                                object.position.set(0, 0, 1); 
+                                object.scale.set(1, 1, 1); 
+                            },
+                            function (xhr) {
+                                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+                            },
+                            function (error) {
+                                console.error('An error happened', error);
+                            });
+                }, 
+                function (xhr) {
+                    console.log('MTL ' + (xhr.loaded / xhr.total * 100) + '% loaded');
+                },
+                function (error) {
+                    console.error('An error happened while loading MTL', error);
+                });
+        }
+
+        // Add event listeners for buttons
+        document.getElementById('triangleMarkerBtn').addEventListener('click', () => {
+            selectedMarkerType = 'triangle_marker';
+            console.log('Triangle Marker selected');
+        });
+
+        document.getElementById('complexShapeMarkerBtn').addEventListener('click', () => {
+            selectedMarkerType = 'complex_marker';
+            console.log('Complex Shape Marker selected');
+        });
 
         //function to handle mouse clicks
         function onDocumentMouseClick(event) {
@@ -163,7 +206,13 @@
 
             //Send the coordinates to the WebSocket server
             if (targetPoint) {
-                socket.send(JSON.stringify({ x: targetPoint.x, y: targetPoint.y, z: targetPoint.z }));
+                let message = {
+                    x: targetPoint.x, 
+                    y: targetPoint.y, 
+                    z: targetPoint.z,
+                    type: selectedMarkerType  // Include the selected marker type
+                };
+                socket.send(JSON.stringify({ message}));
             }
         }
 
