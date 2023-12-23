@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Three.js ASCII Point Cloud Viewer</title>
+    <title>Point Cloud Viewer</title>
     
     <style>
         body {
@@ -14,49 +14,79 @@
         canvas {
             display: block;
         }
-        #buttonsPanel {
-            position: absolute;
-            left: 10px;
-            top: 10px;
-            z-index: 10;
-            padding: 10px;
-            background: #f0f0f0;
-            border-radius: 10px; 
-            box-shadow: 0 4px 8px rgba(147, 147, 147, 0.1); 
-            width: 250px; 
-            height: 250px;
+        .header {
+            position: absolute; 
+            top: 0; 
+            left: 0;
+            width: 100%; 
+            text-align: center; 
+            font-size: 2em; 
+            padding: 10px; 
+            background-color: rgba(65, 64, 64, 0.7); 
+            z-index: 20; 
         }
+        #buttonsPanel {
+        position: absolute;
+        left: 15px;
+        top: 80px;
+        z-index: 10;
+        padding: 10px;
+        background: #f0f0f0;
+        border-radius: 10px; 
+        background-color: rgba(75, 75, 75, 0.7); 
+        width: 250px; 
+        height: 250px;
+
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+}
         button {
-            width: 240px;
+            width: 230px; 
             margin: 10px 0; 
             padding: 10px 20px; 
             font-size: 1em; 
             border: none;
             border-radius: 5px;
             cursor: pointer;
-            background-color: #929191; 
-            color: white; 
+            background-color: #b8b8b8; 
+            color: rgb(0, 0, 0); 
+
+            text-align: center;
         }
         button.active {
+            background-color: #505050a7; 
+        }
+        button.temporary-active {
             background-color: #505050a7; 
         }
     </style>
 </head>
 <body>
+    <div class="header">Point cloud Web viewer</div>
     <div id="buttonsPanel">
-        <button id="triangleMarkerBtn">Triangle Marker</button>
-        <button id="complexShapeMarkerBtn">Complex Shape Marker</button>
-        <button id="cancelBtn">Cancel</button>
-        <button id="clearBtn">Clear</button>
+        <button id="triangleMarkerBtn" class="one-time">Triangle Marker</button>
+        <button id="complexShapeMarkerBtn" class="one-time">Complex Shape Marker</button>
+        <button id="cancelBtn" class="one-time">Cancel</button>
+        <button id="clearBtn" class="one-time">Clear</button>
     </div>
     <script>
-        // handle button press visual feedback
-        document.querySelectorAll('#buttonsPanel button').forEach(button => {
+        document.querySelectorAll('#buttonsPanel button.toggle').forEach(button => {
             button.addEventListener('click', function() {
-                //Remove 'active' class from all buttons
-                document.querySelectorAll('#buttonsPanel button').forEach(btn => btn.classList.remove('active'));
-                //Add 'active' class to the clicked button
-                this.classList.add('active');
+              
+                this.classList.toggle('active');
+            });
+        });
+
+        document.querySelectorAll('#buttonsPanel button.one-time').forEach(button => {
+            button.addEventListener('click', function() {
+              
+                this.classList.add('temporary-active');
+              
+                setTimeout(() => {
+                    this.classList.remove('temporary-active');
+                }, 200); 
             });
         });
     </script>
@@ -67,7 +97,10 @@
         import { MTLLoader } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/loaders/MTLLoader.js';
         import { OBJLoader } from 'https://cdn.skypack.dev/three@0.128.0/examples/jsm/loaders/OBJLoader.js';
 
+        //Global marker type variable
         let selectedMarkerType = '';
+        //Global array to store loaded OBJ shapes
+        let loadedObjShapes = [];
 
         //scene setup
         const scene = new THREE.Scene();
@@ -85,17 +118,35 @@
         document.body.appendChild(renderer.domElement);
 
         //websocket setup
-        const socket = new WebSocket('ws://localhost:8765');
-        socket.onopen = function(e) {
-            console.log("Connection established");
-        };
+        const socketUrl = 'ws://localhost:8765';
+        let socket;
+        let reconnectInterval = 1000; // Time in milliseconds to wait before attempting to reconnect
 
-        socket.onmessage = function(event) {
-            console.log(`Data received from server: ${event.data}`);
-            if (event.data === "new_shape_available") {
-                loadShapeFromOBJ("objects/shape.obj", "objects/shape.mtl");
-            }
-        };
+        function connectWebSocket() {
+            socket = new WebSocket(socketUrl);
+
+            socket.onopen = function(e) {
+                console.log("Connection established");
+            };
+
+            socket.onmessage = function(event) {
+                console.log(`Data received from server: ${event.data}`);
+                if (event.data === "new_shape_available") {
+                    loadShapeFromOBJ("objects/shape.obj", "objects/shape.mtl");
+                }
+            };
+
+            socket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+            };
+
+            socket.onclose = function(e) {
+                console.log('WebSocket connection closed:', e.reason);
+                setTimeout(connectWebSocket, reconnectInterval); // Attempt to reconnect after a delay
+            };
+        }
+
+        connectWebSocket(); // Initial connection
 
         //Animate the scene
         function animate() {
@@ -175,7 +226,7 @@
                     
                 });
         }
-        //Function to load a shape from OBJ and MTL files
+        // Function to load a shape from OBJ and MTL files
         function loadShapeFromOBJ(objPath, mtlPath) {
             new MTLLoader()
                 .load(mtlPath, function (materials) {
@@ -189,19 +240,20 @@
                                     child.material.side = THREE.DoubleSide;
                                 }
                             });
-                            object.scale.set=(1,1,1);
+                            object.scale.set(1, 1, 1);
                             object.position.set(0, 0, 0);
                             object.rotation.x = Math.PI / 2;
                             object.userData.removeOnClear = true;
                             scene.add(object);
-                            },
-                            function (xhr) {
-                                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
-                            },
-                            function (error) {
-                                console.error('An error happened', error);
-                            });
-                }, 
+                            loadedObjShapes.push(object); // Add the object to the array
+                        },
+                        function (xhr) {
+                            console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+                        },
+                        function (error) {
+                            console.error('An error happened', error);
+                        });
+                },
                 function (xhr) {
                     console.log('MTL ' + (xhr.loaded / xhr.total * 100) + '% loaded');
                 },
@@ -247,6 +299,7 @@
                 if (object.geometry) object.geometry.dispose(); // dispose geometry
                 if (object.material) object.material.dispose(); //  dispose material
             });
+            loadedObjShapes = []; // Clear the array
         }
         //function to handle mouse clicks
         function onDocumentMouseClick(event) {

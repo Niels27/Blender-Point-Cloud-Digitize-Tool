@@ -19,6 +19,8 @@ import geopandas as gpd
 #global variables
 last_processed_index = 0 #Global variable to keep track of the last processed index, for numbering road marks
 
+
+#Digitizing operators
 #Operator for drawing a free thick straight line in the viewport using mouseclicks
 class DrawStraightFatLineOperator(bpy.types.Operator):
     
@@ -90,7 +92,7 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
         material = bpy.data.materials.new(name="Line Material")
         material.diffuse_color = marking_color
         obj.data.materials.append(material)
-
+        prepare_object_for_export(obj)
         self.prev_end_point = coord_3d_end
 
         #Create a rectangle object on top of the line
@@ -103,7 +105,7 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
     
 #Operator to draw simple shapes in the viewport using mouseclicks   
 class SimpleMarkOperator(bpy.types.Operator):
-    bl_idname = "view3d.mark_fast"
+    bl_idname = "custom.mark_fast"
     bl_label = "Mark Road Markings fast"
     bl_description= "Mark shapes with simple shapes"
     _is_running = False  #Class variable to check if the operator is already running
@@ -116,6 +118,7 @@ class SimpleMarkOperator(bpy.types.Operator):
         point_colors = pointcloud_data.point_colors
         points_kdtree=  pointcloud_data.points_kdtree
         intensity_threshold = context.scene.intensity_threshold
+        show_popup = context.scene.adjust_intensity_popup
         
         if event.type == 'MOUSEMOVE':  
             self.mouse_inside_view3d = is_mouse_in_3d_view(context, event)
@@ -148,7 +151,7 @@ class SimpleMarkOperator(bpy.types.Operator):
             #Check if the average intensity indicates a road marking (white)
             if average_intensity > intensity_threshold:
                 #if the average intensity is way higher than the threshold, give a warning
-                if(average_intensity-intensity_threshold>intensity_difference_threshold):
+                if(average_intensity-intensity_threshold>intensity_difference_threshold) and show_popup:
                     bpy.ops.wm.correction_pop_up('INVOKE_DEFAULT', average_intensity=average_intensity, adjust_action='HIGHER')
                     return {'PASS_THROUGH'}
                 #Region growing algorithm
@@ -156,7 +159,8 @@ class SimpleMarkOperator(bpy.types.Operator):
             else:
                 print("no road markings found")
                 #if the average intensity is way lower than the threshold, give a warning
-                bpy.ops.wm.correction_pop_up('INVOKE_DEFAULT', average_intensity=average_intensity, adjust_action='LOWER')
+                if show_popup:
+                    bpy.ops.wm.correction_pop_up('INVOKE_DEFAULT', average_intensity=average_intensity, adjust_action='LOWER')
                 return {'PASS_THROUGH'}
                 
             if region_growth_coords:
@@ -189,9 +193,14 @@ class SimpleMarkOperator(bpy.types.Operator):
         
 #Operator to draw complex shapes on mouseclicks using tiny squares, which then get combined into a single mesh         
 class ComplexMarkOperator(bpy.types.Operator):
-    bl_idname = "view3d.mark_complex"
+    bl_idname = "custom.mark_complex"
     bl_label = "Mark complex Road Markings"
     bl_description= "Mark shapes using multiple points"
+    
+    #External coordinates to use when calling the operator from outside
+    external_x: bpy.props.FloatProperty(name="External X")
+    external_y: bpy.props.FloatProperty(name="External Y")
+    external_z: bpy.props.FloatProperty(name="External Z")
     
     _is_running = False  #Class variable to check if the operator is already running
     
@@ -203,58 +212,63 @@ class ComplexMarkOperator(bpy.types.Operator):
         point_colors = pointcloud_data.point_colors
         points_kdtree=  pointcloud_data.points_kdtree
         intensity_threshold = context.scene.intensity_threshold
+        show_popup = context.scene.adjust_intensity_popup
         
         if event.type == 'MOUSEMOVE':  
             self.mouse_inside_view3d = is_mouse_in_3d_view(context, event) 
 
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS'and self.mouse_inside_view3d:
-
             #Get the mouse coordinates
             x, y = event.mouse_region_x, event.mouse_region_y
             #Convert 2D mouse coordinates to 3D view coordinates
             region = context.region
             region_3d = context.space_data.region_3d
             location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
-
-            #Do a nearest-neighbor search
-            num_neighbors = 16  #Number of neighbors 
-            radius = 100
-            _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
-        
-            region_growth_coords = []
-            
-            #Get the average intensity of the nearest points
-            average_intensity = get_average_intensity(nearest_indices[0],point_colors)
-                        
-                #Get the average color of the nearest points
-            average_color = get_average_color(nearest_indices[0],point_colors)
+            self.process_location( context, location, intensity_threshold,points_kdtree,point_coords,point_colors,show_popup)
                 
-            print("average color: ", average_color,"average intensity: " ,average_intensity)
-            
-            intensity_difference_threshold=50
-            #Check if the average intensity indicates a road marking (white)
-            if average_intensity > intensity_threshold:
-                #if the average intensity is way higher than the threshold, give a warning
-                if(average_intensity-intensity_threshold>intensity_difference_threshold):
-                    bpy.ops.wm.correction_pop_up('INVOKE_DEFAULT', average_intensity=average_intensity, adjust_action='HIGHER') 
-                    return {'PASS_THROUGH'}
-                #Region growing algorithm
-                region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, radius, intensity_threshold, region_growth_coords)
-            else:
-                print("no road markings found")
-                #if the average intensity is way lower than the threshold, give a warning
-                bpy.ops.wm.correction_pop_up('INVOKE_DEFAULT', average_intensity=average_intensity, adjust_action='LOWER')
-                return {'PASS_THROUGH'}
-            
-            if region_growth_coords:
-                #Create a single mesh for the combined rectangles
-                create_dots_shape(region_growth_coords)
         #If escape is pressed, stop the operator 
         elif event.type == 'ESC':
             return self.cancel(context)  
 
         return {'PASS_THROUGH'}
 
+    def process_location(self, context, location, intensity_threshold,points_kdtree,point_coords,point_colors,show_popup):
+       
+        #Do a nearest-neighbor search
+        num_neighbors = 16  #Number of neighbors 
+        radius = 100
+        _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
+    
+        region_growth_coords = []
+        
+        #Get the average intensity of the nearest points
+        average_intensity = get_average_intensity(nearest_indices[0],point_colors)
+                    
+            #Get the average color of the nearest points
+        average_color = get_average_color(nearest_indices[0],point_colors)
+            
+        print("average color: ", average_color,"average intensity: " ,average_intensity)
+        
+        intensity_difference_threshold=50
+        #Check if the average intensity indicates a road marking (white)
+        if average_intensity > intensity_threshold:
+            #if the average intensity is way higher than the threshold, give a warning
+            if(average_intensity-intensity_threshold>intensity_difference_threshold) and show_popup:
+                bpy.ops.wm.correction_pop_up('INVOKE_DEFAULT', average_intensity=average_intensity, adjust_action='HIGHER') 
+                return {'PASS_THROUGH'}
+            #Region growing algorithm
+            region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, radius, intensity_threshold, region_growth_coords)
+        else:
+            print("no road markings found")
+            #if the average intensity is way lower than the threshold, give a warning
+            if show_popup:
+                bpy.ops.wm.correction_pop_up('INVOKE_DEFAULT', average_intensity=average_intensity, adjust_action='LOWER')
+            return {'PASS_THROUGH'}
+        
+        if region_growth_coords:
+            #Create a single mesh for the combined rectangles
+            create_dots_shape(region_growth_coords)
+        
     def invoke(self, context, event):
         if ComplexMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
@@ -271,7 +285,23 @@ class ComplexMarkOperator(bpy.types.Operator):
         ComplexMarkOperator._is_running = False  #Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  #Debug message
         return {'CANCELLED'}
-        
+    
+    def execute(self, context):
+        # Use the external coordinates if provided
+        if hasattr(self, 'external_x') and hasattr(self, 'external_y') and hasattr(self, 'external_z'):
+            location = Vector((self.external_x, self.external_y, 0))
+            
+            pointcloud_data = GetPointCloudData()
+            point_coords = pointcloud_data.point_coords
+            point_colors = pointcloud_data.point_colors
+            points_kdtree=  pointcloud_data.points_kdtree
+            intensity_threshold = context.scene.intensity_threshold
+            show_popup = context.scene.adjust_intensity_popup
+            
+            self.process_location(context, location, intensity_threshold,points_kdtree,point_coords,point_colors,show_popup)
+
+        return {'FINISHED'}
+
 #Operator to scans the entire point cloud for road markings, then mark them   
 class FindALlRoadMarkingsOperator(bpy.types.Operator):
     bl_idname = "custom.find_all_road_marks"
@@ -642,6 +672,8 @@ class SelectionDetectionOpterator(bpy.types.Operator):
         mesh.from_pydata(verts, edges, [])
         mesh.update()
         
+        prepare_object_for_export(obj)
+
         TriangleMarkOperator ._is_running = False  #Reset the flag when the operator is cancelled
         print("Operator was properly cancelled")  #Debug message
         return {'CANCELLED'}
@@ -706,7 +738,7 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
                 
             if region_growth_coords:
                 
-                filtered_triangle_coords=filter_noise_with_dbscan(region_growth_coords)
+                filtered_triangle_coords=filter_noise_with_dbscan(region_growth_coords,eps=bpy.context.scene.filter_distance, min_samples=bpy.context.scene.filter_neighbors)
                 self._processed_indices.update(checked_indices)
                 triangle_vertices = create_flexible_triangle(filtered_triangle_coords)
                 self._triangles.append(triangle_vertices)
@@ -787,7 +819,7 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
 
             if checked_indices:
                 points = [point_coords[i] for i in checked_indices]
-                filtered_points = filter_noise_with_dbscan(points)
+                filtered_points = filter_noise_with_dbscan(points,eps=bpy.context.scene.filter_distance, min_samples=bpy.context.scene.filter_neighbors)
                 self._processed_indices.update(checked_indices)
                 triangle_vertices = create_flexible_triangle(filtered_points)
                 self._triangles.append(triangle_vertices)
@@ -871,7 +903,7 @@ class TriangleMarkOperator(bpy.types.Operator):
             if region_growth_coords:
   
                 #current_triangle_coords=[point_coords[i] for i in checked_indices]
-                filtered_current_triangle_coords=filter_noise_with_dbscan(region_growth_coords)
+                filtered_current_triangle_coords=filter_noise_with_dbscan(region_growth_coords,eps=bpy.context.scene.filter_distance, min_samples=bpy.context.scene.filter_neighbors)
                 self._processed_indices.update(checked_indices)
                 current_triangle_vertices = create_flexible_triangle(filtered_current_triangle_coords)
                 self._triangles.append(current_triangle_vertices)
@@ -1153,12 +1185,12 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
 
             if checked_indices:
                 rectangle_points = [point_coords[i] for i in checked_indices]
-                #filtered_points = filter_noise_with_dbscan(points)
+                filtered_points = filter_noise_with_dbscan(rectangle_points,eps=bpy.context.scene.filter_distance, min_samples=bpy.context.scene.filter_neighbors)
                 self._processed_indices.update(checked_indices)
                 rectangle_vertices = create_flexible_rectangle(rectangle_points)
                 self._rectangles.append(rectangle_vertices)
                 self._found_rectangles += 1
-                create_shape(rectangle_points, shape_type="rectangle")
+                create_shape(filtered_points, shape_type="rectangle")
         
     def interpolate_line(self, start, end, num_points=20):
         #Generate points along the line between start and end
@@ -1235,6 +1267,7 @@ class SnappingLineMarkOperator(bpy.types.Operator):
 class DashedLineMarkingOperator(bpy.types.Operator):
     bl_idname = "custom.dashed_line_marking_operator"
     bl_label = "Dashed Line Marking Operator"
+    bl_description = "Finds and marks repeating dash lines after clicking on 2 dash lines"
 
     click_count = 0
     first_cluster_center = None
@@ -1328,7 +1361,7 @@ class DashedLineMarkingOperator(bpy.types.Operator):
 
         #Combine medians to form the median point
         median_point = Vector((median_x, median_y, median_z))
-        mark_point(median_point, "dash line center", size=0.1)
+        mark_point(median_point, "dash line center",size=0.1)
 
         return median_point
 
@@ -1388,7 +1421,7 @@ class DashedLineMarkingOperator(bpy.types.Operator):
                 print("No more clusters found")
                 break  #No more clusters found terminate the search
             
-            mark_point(new_cluster_center, "dash line center", size=0.1)
+            mark_point(new_cluster_center, "dash line center",size=0.1)
 
             #Connect the previous cluster center to the new cluster center
             self.connect_clusters(end_cluster_center, new_cluster_center)
@@ -1483,7 +1516,11 @@ class FixedTriangleMarkOperator(bpy.types.Operator):
     bl_idname = "custom.mark_fixed_triangle"
     bl_label = "mark a fixed triangle"
     bl_description = "Draws a fixed triangle"
-    
+    #Properties to receive external coordinates
+    external_x: bpy.props.FloatProperty(name="External X")
+    external_y: bpy.props.FloatProperty(name="External Y")
+    external_z: bpy.props.FloatProperty(name="External Z")
+
     def modal(self, context, event):
         set_view_to_top(context)
       
@@ -1515,7 +1552,15 @@ class FixedTriangleMarkOperator(bpy.types.Operator):
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
-
+        
+    def execute(self, context):
+        # Use the external coordinates if provided
+        if hasattr(self, 'external_x') and hasattr(self, 'external_y') and hasattr(self, 'external_z'):
+            location = Vector((self.external_x, self.external_y, self.external_z))
+            draw_fixed_triangle(context, location, size=0.5)
+            print("Triangle drawn at", location)
+        return {'FINISHED'}
+    
 #Operator to draw a rectangle of a fixed size at every mouseclick        
 class FixedRectangleMarkOperator(bpy.types.Operator):
     bl_idname = "custom.mark_fixed_rectangle"
@@ -1556,7 +1601,7 @@ class FixedRectangleMarkOperator(bpy.types.Operator):
 
 
 #module imports
-from ..utils.blender_utils import GetPointCloudData, is_mouse_in_3d_view, set_view_to_top, get_click_point_in_3d
+from ..utils.blender_utils import GetPointCloudData, is_mouse_in_3d_view, set_view_to_top, get_click_point_in_3d, prepare_object_for_export
 from ..utils.math_utils import calculate_adjusted_extreme_points
 from ..utils.digitizing_utils import mark_point, create_shape, create_rectangle_line_object, create_polyline,create_flexible_triangle, create_dots_shape, draw_line, create_flexible_rectangle,create_fixed_square,draw_fixed_triangle
 from ..utils.math_utils import get_average_color, get_average_intensity, filter_noise_with_dbscan, move_triangle_to_line, region_growing

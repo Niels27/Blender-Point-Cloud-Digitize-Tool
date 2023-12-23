@@ -1652,6 +1652,7 @@ class SnappingLineMarkOperator(bpy.types.Operator):
 class DashedLineMarkingOperator(bpy.types.Operator):
     bl_idname = "custom.dashed_line_marking_operator"
     bl_label = "Dashed Line Marking Operator"
+    bl_description = "Finds and marks repeating dash lines after clicking on 2 dash lines"
 
     click_count = 0
     first_cluster_center = None
@@ -2006,7 +2007,7 @@ class GetPointCloudData:
         start_time = time.time()
         print("Started loading point cloud.."),
         global use_pickled_kdtree,point_cloud_name,point_cloud_point_size, save_json
-        reload_data= bpy.context.scene.load_existing_data
+        overwrite_data= bpy.context.scene.overwrite_existing_data
         
         base_file_name = os.path.basename(path)
         point_cloud_name = base_file_name
@@ -2031,7 +2032,7 @@ class GetPointCloudData:
         if not os.path.exists(stored_data_path):
             os.mkdir(stored_data_path)
         
-        if not os.path.exists(os.path.join(stored_data_path, file_name_points)) or not reload_data:
+        if not os.path.exists(os.path.join(stored_data_path, file_name_points)) or overwrite_data:
             
             point_cloud = lp.read(path) 
             ground_code = 2 #the ground is usually 2
@@ -2128,7 +2129,7 @@ class GetPointCloudData:
         if use_pickled_kdtree:
             #KDTree handling
             kdtree_pickle_path = os.path.join(stored_data_path, file_name_kdtree_pickle)
-            if not os.path.exists(kdtree_pickle_path) or not reload_data:
+            if not os.path.exists(kdtree_pickle_path) or overwrite_data:
                 #Create the kdtree if it doesn't exist
                 print("creating cKDTree..")
                 start_time = time.time()
@@ -2143,7 +2144,7 @@ class GetPointCloudData:
             #KDTree handling
             kdtree_path = os.path.join(stored_data_path, file_name_kdtree)
             self.points_kdtree = load_kdtree_from_file(kdtree_path)
-            if not os.path.exists(kdtree_pickle_path) or bpy.types.Scene.load_existing_data == False:
+            if not os.path.exists(kdtree_pickle_path) or bpy.types.Scene.overwrite_existing_data == False:
                 #create the kdtree if it doesn't exist
                 self.points_kdtree = cKDTree(np.array(self.point_coords))
                 print("kdtree created in: ", time.time() - start_time)
@@ -3672,10 +3673,11 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         
         row = layout.row(align=True)
         row.operator("wm.las_open", text="Import point cloud")
-        row.prop(scene, "ground_only")
+        row.prop(scene, "sparsity_value")
+        
 
         row = layout.row(align=True)
-        row.prop(scene, "sparsity_value")
+        row.prop(scene, "ground_only")
         row.prop(scene, "z_height_cut_off")
         
         row = layout.row(align=True)
@@ -3711,12 +3713,13 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row.operator("custom.mark_rectangle", text="Rectangles marker")
         row.operator("custom.auto_mark_rectangle", text="Auto rectangles marker")
         
-        row = layout.row()
-        row.prop(scene, "snap_to_road_mark")
-        row.prop(scene, "fatline_width")
+
         row = layout.row()
         row.operator("custom.mark_snapping_line", text="Line marker") 
         row.operator("custom.auto_curved_line", text="Auto line marker") 
+        row = layout.row()
+        row.prop(scene, "snap_to_road_mark")
+        row.prop(scene, "fatline_width")
        
         layout.operator("custom.dashed_line_marking_operator", text="Dash line marker") 
         layout.operator("custom.curb_detection_operator", text="Curb marker") 
@@ -3741,7 +3744,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row = layout.row()
         row.prop(scene, "auto_load")
         row = layout.row()
-        row.prop(scene, "load_existing_data")
+        row.prop(scene, "overwrite_existing_data")
         row = layout.row()
         row.prop(scene, "show_dots")
         row = layout.row()
@@ -3787,38 +3790,37 @@ def register():
     bpy.utils.register_class(DashedLineMarkingOperator)
     
     
-    bpy.types.Scene.point_size = IntProperty(name="POINT SIZE",
-                                      default=1)
+    bpy.types.Scene.point_size = IntProperty(name="POINT SIZE",default=1)
     bpy.types.Scene.intensity_threshold = bpy.props.FloatProperty(
         name="Intensity threshold",
         description="Minimum intensity threshold",
-        default=160,  #Default value
-        min=0,#Minimum value
-        max=255,#Max value
+        default=160, 
+        min=0,
+        max=255,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.markings_threshold = bpy.props.IntProperty(
         name="Max:",
         description="Maximum markings amount for auto marker",
-        default=5,  #Default value
-        min=1, #Minimum value
-        max=100, #Max value  
+        default=5,  
+        min=1, 
+        max=100,   
         subtype='UNSIGNED' 
     )
     bpy.types.Scene.points_percentage = bpy.props.IntProperty(
-        name="Point %:",
+        name="with point %:",
         description="Percentage of points to export",
-        default=2,  #Default value
-        min=1, #Minimum value
-        max=100, #Max value  
+        default=2,  
+        min=1, 
+        max=100, 
         subtype='UNSIGNED' 
     )
     bpy.types.Scene.sparsity_value = bpy.props.FloatProperty(
         name="Sparsity:",
         description="sparsity of points rendered",
-        default=0.2,  #Default value
-        min=0.01, #Minimum value
-        max=1, #Max value  
+        default=0.2, 
+        min=0.01, 
+        max=1,
         subtype='UNSIGNED' 
     )
     bpy.types.Scene.fatline_width = bpy.props.FloatProperty(
@@ -3882,7 +3884,7 @@ def register():
     bpy.types.Scene.ground_only = bpy.props.BoolProperty(
         name="Ground only",
         description="Toggle loading points from ground classification only",
-        default=False,
+        default=True,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.z_height_cut_off = bpy.props.FloatProperty(
@@ -3895,15 +3897,15 @@ def register():
     bpy.types.Scene.extra_z_height = bpy.props.FloatProperty(
         name="Marking height",
         description="Extra height of all markings compared to the ground level",
-        default=0.01,
+        default=0.05,
         min=-100, max=100, 
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.filter_distance = bpy.props.FloatProperty(
         name="Filter distance",
         description="Max distance between points for filtering",
-        default=0.05,
-        min=0.000, max=1.0,
+        default=0.2,
+        min=0.001, max=1.0,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.filter_neighbors = bpy.props.IntProperty(
@@ -3919,10 +3921,10 @@ def register():
         default=True,
         subtype='UNSIGNED'  
     )
-    bpy.types.Scene.load_existing_data= bpy.props.BoolProperty(
-        name="Load existing point cloud data",
-        description="Loads existing point cloud data with the same name to save time",
-        default=True,
+    bpy.types.Scene.overwrite_existing_data= bpy.props.BoolProperty(
+        name="Overwrite existing point cloud data",
+        description="Overwrite existing point cloud data with the same name",
+        default=False,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.adjust_intensity_popup= bpy.props.BoolProperty(
@@ -3979,7 +3981,7 @@ def unregister():
     del bpy.types.Scene.points_percentage
     del bpy.types.Scene.sparsity_value
     del bpy.types.Scene.ground_only
-    del bpy.types.Scene.load_existing_data
+    del bpy.types.Scene.overwrite_existing_data
     del bpy.types.Scene.filter_distance
     del bpy.types.Scene.filter_neighbors
     del bpy.types.Scene.adjust_intensity_popup

@@ -22,6 +22,7 @@ point_cloud_point_size =  1 #The size of the points in the point cloud
 undo_stack = [] #Keeps track of all objects created/removed for undo functions
 redo_stack = []#Keeps track of all objects created/removed for redo functions
 
+#Utility operators
 #Operator to import las/laz files                         
 class LAS_OT_OpenOperator(bpy.types.Operator):
     
@@ -32,11 +33,9 @@ class LAS_OT_OpenOperator(bpy.types.Operator):
     
     def execute(self, context):
         start_time = time.time()
-      
         bpy.context.scene["Filepath to the loaded pointcloud"] = self.filepath
         sparsity_value = bpy.context.scene.sparsity_value
         point_size = bpy.context.scene.point_size
-        points_percentage=bpy.context.scene.points_percentage
         z_height_cut_off=bpy.context.scene.z_height_cut_off
         pointcloud_data = GetPointCloudData()
         pointcloud_data.pointcloud_load_optimized(self.filepath, point_size, sparsity_value,z_height_cut_off)
@@ -109,7 +108,6 @@ class GetPointsInfoOperator(bpy.types.Operator):
                 #Get the mouse coordinates
                 x, y = event.mouse_region_x, event.mouse_region_y
                 #Convert 2D mouse coordinates to 3D view coordinates
-                view3d = context.space_data
                 region = context.region
                 region_3d = context.space_data.region_3d
                 location = region_2d_to_location_3d(region, region_3d, (x, y), (0, 0, 0))
@@ -278,7 +276,7 @@ class CreatePointCloudObjectOperator(bpy.types.Operator):
         mesh.materials[0] = material
       else:
         mesh.materials.append(material)
-        
+      prepare_object_for_export(obj)  
       return obj 
    
     def execute(self, context):
@@ -347,5 +345,5 @@ class PopUpOperator(bpy.types.Operator):
 
     
 #module imports
-from ..utils.blender_utils import GetPointCloudData, is_mouse_in_3d_view, redraw_viewport, export_as_shapefile, is_click_on_white,set_view_to_top
+from ..utils.blender_utils import GetPointCloudData, is_mouse_in_3d_view, redraw_viewport, export_as_shapefile, is_click_on_white,set_view_to_top, prepare_object_for_export
 from ..utils.math_utils import get_average_intensity

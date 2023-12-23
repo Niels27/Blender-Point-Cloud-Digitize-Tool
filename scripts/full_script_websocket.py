@@ -84,56 +84,118 @@ save_json=False #generate a json file of point cloud data
 last_processed_index = 0 #Global variable to keep track of the last processed index, for numbering road marks
 websocket_port = 8765 #port to use for websockets
 active_websockets = set() #Global variable to store active websockets
+websocket_server_manager=None #Global variable to store the websocket server manager
 
 #Websocket handling
 #Class to handle the websocket server 
 class WebSocketServerManager:
-    def __init__(self):
-        global websocket_port
+    def __init__(self, port):
+        self.port = port
+        self.loop = None
         self.server = None
         self.thread = None
-        self.loop = None
-        self.port = websocket_port
 
     def start_server(self):
+        if self.thread is not None and self.thread.is_alive():
+            print("WebSocket server is already running.")
+            return
+
+        #Set up a new event loop for the thread
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
-        self.server = websockets.serve(handle, "localhost", self.port)
-        self.loop.run_until_complete(self.server)
-        self.loop.run_forever()
+
+        #Start the server coroutine within this loop
+        server_coro = websockets.serve(handle, "localhost", self.port)
+        self.server = self.loop.run_until_complete(server_coro)
+
+        #Run the loop in a separate thread
+        self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
+        self.thread.start()
+        print("WebSocket server started on port", self.port)
 
     def stop_server(self):
-        if self.loop is not None:
-            self.loop.call_soon_threadsafe(self.loop.stop)
-            self.thread.join()
-            self.loop = None
-            self.thread = None
-            
+        if self.loop is None or not self.loop.is_running():
+            print("WebSocket server is not running.")
+            return
+
+        #Schedule the server to close and stop the loop
+        self.loop.call_soon_threadsafe(self.server.close)
+        self.loop.call_soon_threadsafe(self.loop.stop)
+
+        #Wait for the thread to finish
+        self.thread.join()
+        self.thread = None
+        self.loop = None
+        print("WebSocket server stopped.")
+
     def restart_server(self):
         self.stop_server()
-        self.thread = threading.Thread(target=self.start_server, daemon=True)
-        self.thread.start()
+        self.start_server()
+        
+#update the websocket server when the checkbox is changed
+def update_connect_socket(self, context):
+    global websocket_server_manager,websocket_port
+    if self.connect_socket:
+        websocket_server_manager = WebSocketServerManager(port=websocket_port)
+        websocket_server_manager.restart_server()
+    else:
+        if websocket_server_manager is not None:
+            websocket_server_manager.stop_server()
+        else:
+            print("WebSocket server never started")
 
-    def start_server_in_thread(self):
-        self.thread = threading.Thread(target=self.start_server, daemon=True)
-        self.thread.start()
-
+#Function to execute operators at given coordinates
+def execute_operators_at_coordinates(x,y,z,marker):
     
-bpy.types.Scene.connect_socket= bpy.props.BoolProperty(
-    name="Enable websocket",
-    description="Open a websocket connection to the webviewer",
-    default=False,
-    subtype='UNSIGNED'  
-)
+    #Create a Vector for the incoming coordinates 
+    point = [x, y, z]
+    if(marker=="triangle_marker"):
+        bpy.ops.custom.mark_fixed_triangle(external_x=point[0], external_y=point[1], external_z=point[2])
+    elif(marker=="complex_marker"):
+        bpy.ops.custom.mark_complex(external_x=point[0], external_y=point[1], external_z=point[2])
+    elif(marker=="None"):
+        print("No marker selected")
+    else:
+        print("Unknown marker type")
+        
+    send_shape_to_webviewer=False
+    if send_shape_to_webviewer:
+        #Send message back to webviewer after execution
+        asyncio.run(send_message_to_websocket("new_shape_available"))
+    
+#Function to send data to the websocket
+async def handle(websocket, path):
+    global active_websockets
+    active_websockets.add(websocket)
+    try:
+        while True:
+            message = await websocket.recv()
+            print(f"Received data: {message}")
             
-if bpy.context.scene.connect_socket:   
-
-    #global websocket instance
-    if "websocket_server_manager" not in globals():
-        websocket_server_manager = WebSocketServerManager()
-
-    # Start or restart the server
-    websocket_server_manager.restart_server()
+            # Parse the JSON data
+            try:
+                data = json.loads(message)  #Parse the JSON message
+                if "message" in data:  #Check if 'message' key exists
+                    msg_data = data["message"]  
+                    if all(k in msg_data for k in ("x", "y", "z", "type")):
+                        execute_operators_at_coordinates(msg_data["x"], msg_data["y"], msg_data["z"], msg_data["type"])
+                    else:
+                        print("Received data is not in the correct format")
+            except json.JSONDecodeError:
+                print("Invalid data format")  
+    finally:
+        active_websockets.remove(websocket)
+        
+# Function to send data to all connected websockets
+async def send_message_to_websocket(message):
+    if active_websockets:
+        await asyncio.wait([websocket.send(message) for websocket in active_websockets])
+          
+#Function to send files over the websocket            
+async def send_file_over_websocket(websocket, file_path):
+    with open(file_path, 'rb') as file:
+        data = file.read()
+        await websocket.send(data)
 
 #Function to execute operators at given coordinates
 def execute_operators_at_coordinates(x,y,z,marker):
@@ -1763,6 +1825,7 @@ class SnappingLineMarkOperator(bpy.types.Operator):
 class DashedLineMarkingOperator(bpy.types.Operator):
     bl_idname = "custom.dashed_line_marking_operator"
     bl_label = "Dashed Line Marking Operator"
+    bl_description = "Finds and marks repeating dash lines after clicking on 2 dash lines"
 
     click_count = 0
     first_cluster_center = None
@@ -2117,7 +2180,7 @@ class GetPointCloudData:
         start_time = time.time()
         print("Started loading point cloud.."),
         global use_pickled_kdtree,point_cloud_name,point_cloud_point_size, save_json
-        reload_data= bpy.context.scene.load_existing_data
+        overwrite_data= bpy.context.scene.overwrite_existing_data
         
         base_file_name = os.path.basename(path)
         point_cloud_name = base_file_name
@@ -2142,7 +2205,7 @@ class GetPointCloudData:
         if not os.path.exists(stored_data_path):
             os.mkdir(stored_data_path)
         
-        if not os.path.exists(os.path.join(stored_data_path, file_name_points)) or not reload_data:
+        if not os.path.exists(os.path.join(stored_data_path, file_name_points)) or overwrite_data:
             
             point_cloud = lp.read(path) 
             ground_code = 2 #the ground is usually 2
@@ -2239,7 +2302,7 @@ class GetPointCloudData:
         if use_pickled_kdtree:
             #KDTree handling
             kdtree_pickle_path = os.path.join(stored_data_path, file_name_kdtree_pickle)
-            if not os.path.exists(kdtree_pickle_path) or not reload_data:
+            if not os.path.exists(kdtree_pickle_path) or overwrite_data:
                 #Create the kdtree if it doesn't exist
                 print("creating cKDTree..")
                 start_time = time.time()
@@ -2254,7 +2317,7 @@ class GetPointCloudData:
             #KDTree handling
             kdtree_path = os.path.join(stored_data_path, file_name_kdtree)
             self.points_kdtree = load_kdtree_from_file(kdtree_path)
-            if not os.path.exists(kdtree_pickle_path) or bpy.types.Scene.load_existing_data == False:
+            if not os.path.exists(kdtree_pickle_path) or bpy.types.Scene.overwrite_existing_data == False:
                 #create the kdtree if it doesn't exist
                 self.points_kdtree = cKDTree(np.array(self.point_coords))
                 print("kdtree created in: ", time.time() - start_time)
@@ -2456,8 +2519,8 @@ def export_shape_as_obj(obj, name):
     
     save_obj_for_webviewer=True
     if(save_obj_for_webviewer):
-        shapes_dir = os.path.join(directory, "webbased poc/shape objects")
-        obj_file_path = os.path.join(shapes_dir, f"{name}.obj")
+        shapes_dir = os.path.join(directory, "webbased poc/objects")
+        obj_file_path = os.path.join(shapes_dir, "shape.obj")
         bpy.ops.export_scene.obj(filepath=obj_file_path, use_selection=True,use_materials=True)
         
     obj.select_set(False)
@@ -3805,10 +3868,11 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         
         row = layout.row(align=True)
         row.operator("wm.las_open", text="Import point cloud")
-        row.prop(scene, "ground_only")
+        row.prop(scene, "sparsity_value")
+        
 
         row = layout.row(align=True)
-        row.prop(scene, "sparsity_value")
+        row.prop(scene, "ground_only")
         row.prop(scene, "z_height_cut_off")
         
         row = layout.row(align=True)
@@ -3844,12 +3908,13 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row.operator("custom.mark_rectangle", text="Rectangles marker")
         row.operator("custom.auto_mark_rectangle", text="Auto rectangles marker")
         
-        row = layout.row()
-        row.prop(scene, "snap_to_road_mark")
-        row.prop(scene, "fatline_width")
+
         row = layout.row()
         row.operator("custom.mark_snapping_line", text="Line marker") 
         row.operator("custom.auto_curved_line", text="Auto line marker") 
+        row = layout.row()
+        row.prop(scene, "snap_to_road_mark")
+        row.prop(scene, "fatline_width")
        
         layout.operator("custom.dashed_line_marking_operator", text="Dash line marker") 
         layout.operator("custom.curb_detection_operator", text="Curb marker") 
@@ -3874,7 +3939,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row = layout.row()
         row.prop(scene, "auto_load")
         row = layout.row()
-        row.prop(scene, "load_existing_data")
+        row.prop(scene, "overwrite_existing_data")
         row = layout.row()
         row.prop(scene, "connect_socket") 
         row = layout.row()
@@ -3922,38 +3987,37 @@ def register():
     bpy.utils.register_class(DashedLineMarkingOperator)
     
     
-    bpy.types.Scene.point_size = IntProperty(name="POINT SIZE",
-                                      default=1)
+    bpy.types.Scene.point_size = IntProperty(name="POINT SIZE", default=1)
     bpy.types.Scene.intensity_threshold = bpy.props.FloatProperty(
         name="Intensity threshold",
         description="Minimum intensity threshold",
-        default=160,  #Default value
-        min=0,#Minimum value
-        max=255,#Max value
+        default=160, 
+        min=0,
+        max=255,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.markings_threshold = bpy.props.IntProperty(
         name="Max:",
         description="Maximum markings amount for auto marker",
-        default=5,  #Default value
-        min=1, #Minimum value
-        max=100, #Max value  
+        default=5,  
+        min=1, 
+        max=100, 
         subtype='UNSIGNED' 
     )
     bpy.types.Scene.points_percentage = bpy.props.IntProperty(
-        name="Point %:",
+        name="with point %:",
         description="Percentage of points to export",
-        default=2,  #Default value
-        min=1, #Minimum value
-        max=100, #Max value  
+        default=2,  
+        min=1, 
+        max=100, 
         subtype='UNSIGNED' 
     )
     bpy.types.Scene.sparsity_value = bpy.props.FloatProperty(
         name="Sparsity:",
         description="sparsity of points rendered",
-        default=0.2,  #Default value
-        min=0.01, #Minimum value
-        max=1, #Max value  
+        default=0.2,  
+        min=0.01, 
+        max=1, 
         subtype='UNSIGNED' 
     )
     bpy.types.Scene.fatline_width = bpy.props.FloatProperty(
@@ -4017,7 +4081,7 @@ def register():
     bpy.types.Scene.ground_only = bpy.props.BoolProperty(
         name="Ground only",
         description="Toggle loading points from ground classification only",
-        default=False,
+        default=True,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.z_height_cut_off = bpy.props.FloatProperty(
@@ -4030,15 +4094,15 @@ def register():
     bpy.types.Scene.extra_z_height = bpy.props.FloatProperty(
         name="Marking height",
         description="Extra height of all markings compared to the ground level",
-        default=0.01,
+        default=0.05,
         min=-100, max=100, 
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.filter_distance = bpy.props.FloatProperty(
         name="Filter distance",
         description="Max distance between points for filtering",
-        default=0.05,
-        min=0.000, max=1.0,
+        default=0.2,
+        min=0.001, max=1.0,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.filter_neighbors = bpy.props.IntProperty(
@@ -4054,10 +4118,10 @@ def register():
         default=True,
         subtype='UNSIGNED'  
     )
-    bpy.types.Scene.load_existing_data= bpy.props.BoolProperty(
-        name="Load existing point cloud data",
-        description="Loads existing point cloud data with the same name to save time",
-        default=True,
+    bpy.types.Scene.overwrite_existing_data= bpy.props.BoolProperty(
+        name="Overwrite existing point cloud data",
+        description="Overwrite existing point cloud data with the same name",
+        default=False,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.adjust_intensity_popup= bpy.props.BoolProperty(
@@ -4066,7 +4130,12 @@ def register():
         default=True,
         subtype='UNSIGNED'  
     )
-
+    bpy.types.Scene.connect_socket= bpy.props.BoolProperty(
+        name="Enable websocket",
+        description="Open a websocket connection to the webviewer",
+        default=False,
+        update=update_connect_socket
+    )
 #Unregister the operators and panel                                    
 def unregister():
     
@@ -4114,7 +4183,7 @@ def unregister():
     del bpy.types.Scene.points_percentage
     del bpy.types.Scene.sparsity_value
     del bpy.types.Scene.ground_only
-    del bpy.types.Scene.load_existing_data
+    del bpy.types.Scene.overwrite_existing_data
     del bpy.types.Scene.connect_socket
     del bpy.types.Scene.filter_distance
     del bpy.types.Scene.filter_neighbors

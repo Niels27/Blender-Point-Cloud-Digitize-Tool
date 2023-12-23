@@ -20,6 +20,7 @@ import geopandas as gpd
 #global variables
 shape_counter=1 #Keeps track of amount of shapes drawn, used to number them
 
+#Blender digitizing functions 
 #Function to create a flexible triangle shape out of coordinates                                    
 def create_flexible_triangle(coords):
 
@@ -49,7 +50,7 @@ def create_flexible_triangle(coords):
 
     return [vertex1.tolist(), vertex2.tolist(), third_vertex.tolist()]
 
-#Function to create a fixed triangle shape out of coordinates
+#Function to draw a fixed triangle shape out of coordinates
 def draw_fixed_triangle(context, location, size=1.0):
     
     extra_z_height = context.scene.extra_z_height
@@ -118,14 +119,22 @@ def create_fixed_triangle(coords, side_length=0.5):
 #Function to create a flexible rectangle shape out of coordinates
 def create_flexible_rectangle(coords):
     
-    hull = ConvexHull(coords)
-    vertices = np.array([coords[v] for v in hull.vertices])
-    centroid = np.mean(vertices, axis=0)
-    north = max(vertices, key=lambda p: p[1])
-    south = min(vertices, key=lambda p: p[1])
-    east = max(vertices, key=lambda p: p[0])
-    west = min(vertices, key=lambda p: p[0])
-    return [north, east, south, west]
+    extra_z_height = bpy.context.scene.extra_z_height
+    coords_np = np.array(coords)
+
+    #Find minimum and maximum X and Y coordinates ignoring Z-coordinate if present
+    min_x = np.min(coords_np[:, 0])
+    max_x = np.max(coords_np[:, 0])
+    min_y = np.min(coords_np[:, 1])
+    max_y = np.max(coords_np[:, 1])
+
+    #Create rectangle corners 
+    top_left = (min_x, max_y, extra_z_height)
+    top_right = (max_x, max_y, extra_z_height)
+    bottom_right = (max_x, min_y, extra_z_height)
+    bottom_left = (min_x, min_y, extra_z_height)
+
+    return [top_left, top_right, bottom_right, bottom_left]
 
 #Function to create a fixed rectangle shape at a location
 def create_fixed_square(context, location, size=1.0):
@@ -236,7 +245,7 @@ def create_shape(coords_list, shape_type,vertices=None,filter_coords=True):
     line_width = bpy.context.scene.fatline_width
     shape_coords = None  #Default to original coordinates
     if filter_coords:
-        coords_list=filter_noise_with_dbscan(coords_list)
+        coords_list=filter_noise_with_dbscan(coords_list,eps=bpy.context.scene.filter_distance, min_samples=bpy.context.scene.filter_neighbors)
     
     if shape_type == "triangle":
         #flexible_coords = create_flexible_triangle(coords_list)
@@ -279,7 +288,8 @@ def create_shape(coords_list, shape_type,vertices=None,filter_coords=True):
             marking_color, transparency)
         
     print(f"Rendered {shape_type} shape in: {time.time() - start_time:.2f} seconds")
-
+    prepare_object_for_export(obj)
+    
 #Function to create a mesh object
 def create_mesh_with_material(obj_name, shape_coords, marking_color, transparency):
     
@@ -307,6 +317,7 @@ def create_mesh_with_material(obj_name, shape_coords, marking_color, transparenc
     principled_node.inputs['Alpha'].default_value = transparency
 
     obj.data.materials.append(mat)
+    prepare_object_for_export(obj)
     return obj
 
 #Function to draw a line between two points with optional snapping
@@ -317,7 +328,6 @@ def draw_line(self, context, event,point_coords, point_colors, points_kdtree):
     snap_to_road_mark = context.scene.snap_to_road_mark
     extra_z_height = context.scene.extra_z_height
     
-    view3d = context.space_data
     region = context.region
     region_3d = context.space_data.region_3d
     
@@ -385,7 +395,6 @@ def create_rectangle_line_object(start, end):
     width = context.scene.fatline_width
     #Calculate the direction vector and its length
     direction = end - start
-    length = direction.length
 
     direction.normalize()
 
@@ -439,13 +448,13 @@ def create_rectangle_line_object(start, end):
     
     #Assign the material to the object
     obj.data.materials.append(material)
+    prepare_object_for_export(obj)
 
     return obj
 
 #Function to create multiple squares on top of detected points, then combines them into one shape
 def create_dots_shape(coords_list,name="Dots Shape", filter_points=True):
     
-    start_time=time.time()
     global shape_counter
     
     marking_color=bpy.context.scene.marking_color
@@ -465,7 +474,7 @@ def create_dots_shape(coords_list,name="Dots Shape", filter_points=True):
 
     if filter_points:
         #filters out bad points
-        coords_list = filter_noise_with_dbscan(coords_list)
+        coords_list = filter_noise_with_dbscan(coords_list,eps=bpy.context.scene.filter_distance, min_samples=bpy.context.scene.filter_neighbors)
     
     #Sort the coordinates by distance
     coords_list.sort(key=lambda coords: (coords[0]**2 + coords[1]**2 + coords[2]**2)**0.5)
@@ -519,6 +528,7 @@ def create_dots_shape(coords_list,name="Dots Shape", filter_points=True):
         
     obj.color = marking_color  #Set viewport display color 
     shape_counter+=1
+    prepare_object_for_export(obj)
     
 #Function to draw tiny marks on a given point
 def mark_point(point, name="point", size=0.05):
@@ -564,6 +574,7 @@ def create_triangle_outline(vertices):
     bpy.context.view_layer.objects.active = obj
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     
+    prepare_object_for_export(obj)
     return obj
 
 #Function to find nearby road marks and then snap the line, made out of 2 click points, to it
@@ -609,5 +620,5 @@ def snap_line_to_road_mark(self, context, first_click_point, last_click_point,po
 
 
 #module imports
-from ..utils.blender_utils import store_object_state, is_click_on_white
-from ..utils.math_utils import create_middle_points, filter_noise_with_dbscan, move_triangle_to_line
+from ..utils.blender_utils import is_click_on_white, prepare_object_for_export
+from ..utils.math_utils import create_middle_points, filter_noise_with_dbscan, move_triangle_to_line, region_growing

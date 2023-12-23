@@ -1,5 +1,6 @@
 #library imports
 import bpy
+from bpy import context
 import cv2
 import os
 import bpy
@@ -108,7 +109,7 @@ def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
     else:
         coords_list = np.array(points)
     
-    #coords_list = filter_noise_with_dbscan(coords_list)
+    #coords_list = filter_noise_with_dbscan(coords_list,eps=bpy.context.scene.filter_distance, min_samples=bpy.context.scene.filter_neighbors)
     #Convert the floating points to integers
     int_coords = np.round(coords_list).astype(int)
 
