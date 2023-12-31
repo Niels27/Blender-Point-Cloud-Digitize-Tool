@@ -18,6 +18,8 @@ Installing Libraries: full script.py has functions to install multiple libraries
 
 Manual import takes 1-3 minutes first time, but ~70% faster subsequent times. 
 
+Launching web viewer: launch a terminal in /webbased poc/  then enter: python app.py
+Open http://127.0.0.1:5000/ in browser. 
 
 
 FUNCTIONS
@@ -69,9 +71,20 @@ Curb marker: finds curbs between 2 mouse clicks, then marks the top and bottom u
 
 Dash line marker: click 2 dash lines, the function will try find more in the same direction at the same interval
 
-Save shapes: saves a small picture of every shape drawn from there on out in road_mark_images.
+
 
 Show dots: some functions create small red feedback dots, useful for debugging.
+
+Overwrite existing point cloud data: enable if you made changes to .las file with the same name, so new kdtree gets created. Otherwise loads old data
+
+Enable websockets: Enable opens websockets for webviewer
+
+Intensity suggestion pop up: A pop up that helps you adjust the right intensity threshold 
+
+Save shapes: Saves .obj + .mtl of each blender object
+
+Save shape images: saves a small picture (.png) of every shape drawn from there on out in road_mark_images.
+
 
 -----------------------------------------------------------------------------------
 
@@ -81,8 +94,7 @@ Issues:
 - Dirty/noisy point clouds are challenging, region growing fails often..It includes points that it should not. Solution-> AI to recognize shapes.
   openCV shape recognition could work, but the shapes found using region growing are too imperfect and complex to find contours, and openCV is technically not AI anyway..
   Training CNN on road mark shapes such as zebra crossing, shark teeth and symbols like bicycles is better but requires large dataset and time to train. Could work in python script using TensorFlow. 
-- Webbased PoC (proof of concept) uses a (zipped) SHAPEFILE to load a point cloud in a web enviroment, using Flask and Three.js. Then, it sends coordinates of mouseclicks to blender using sockets.
-  Currently does not work.  
+
 
 Warnings:
 

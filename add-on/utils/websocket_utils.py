@@ -14,7 +14,7 @@ websocket_port = 8765 #port to use for websockets
 active_websockets = set() #Global variable to store active websockets
 websocket_server_manager=None #Global variable to store the websocket server manager
 
-
+#Websocket handling
 #Class to handle the websocket server 
 class WebSocketServerManager:
     def __init__(self, port):
@@ -59,6 +59,7 @@ class WebSocketServerManager:
     def restart_server(self):
         self.stop_server()
         self.start_server()
+        
 #update the websocket server when the checkbox is changed
 def update_connect_socket(self, context):
     global websocket_server_manager,websocket_port
@@ -70,7 +71,16 @@ def update_connect_socket(self, context):
             websocket_server_manager.stop_server()
         else:
             print("WebSocket server never started")
-
+            
+def run_asyncio_coroutine(coroutine):
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(coroutine)
+        loop.close()
+    except Exception as e:
+        print("Error in run_asyncio_coroutine:", e)
+          
 #Function to execute operators at given coordinates
 def execute_operators_at_coordinates(x,y,z,marker):
     
@@ -88,12 +98,14 @@ def execute_operators_at_coordinates(x,y,z,marker):
     send_shape_to_webviewer=False
     if send_shape_to_webviewer:
         #Send message back to webviewer after execution
-        asyncio.run(send_message_to_websocket("new_shape_available"))
-    
+        #asyncio.run(send_message_to_websocket("new_shape_available"))
+        threading.Thread(target=run_asyncio_coroutine, args=(send_message_to_websocket("new_shape_available"),)).start()
+        
 #Function to send data to the websocket
 async def handle(websocket, path):
     global active_websockets
     active_websockets.add(websocket)
+    print("WebSocket connected:", websocket)
     try:
         while True:
             message = await websocket.recv()
@@ -112,15 +124,21 @@ async def handle(websocket, path):
                 print("Invalid data format")  
     finally:
         active_websockets.remove(websocket)
-        
+
 #Function to send data to all connected websockets
 async def send_message_to_websocket(message):
-    if active_websockets:
-        await asyncio.wait([websocket.send(message) for websocket in active_websockets])
-          
+    try:
+        if active_websockets:
+            print("attempting to send message to websocket")
+            await asyncio.wait([websocket.send(message) for websocket in active_websockets])
+            print("Sent message: ", message, " to websockets")  
+        else:
+            print("No active websockets found")
+    except Exception as e:
+        print("Error sending message to websocket:", str(e))
+       
 #Function to send files over the websocket            
 async def send_file_over_websocket(websocket, file_path):
     with open(file_path, 'rb') as file:
         data = file.read()
         await websocket.send(data)
-

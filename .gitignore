@@ -20,3 +20,4 @@ webbased poc/pointclouds/pointcloud.txt
 *.mtl
 *.obj
 *.laz
+webbased poc/static/pointclouds/pointcloud.txt

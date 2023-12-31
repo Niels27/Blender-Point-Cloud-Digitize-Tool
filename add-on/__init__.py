@@ -4,7 +4,7 @@ bl_info = {
     "name": "Point Cloud Digitizing Tool",
     "description": "A custom add-on for digitizing road marks in point clouds",
     "author": "Niels van der Wal",
-    "version": (1, 1, 3),
+    "version": (1, 1, 4),
     "blender": (3, 4, 0),  
     "location": "View3D > Tools > Digitize Tool",
     "category": "3D View"

@@ -143,7 +143,16 @@ def update_connect_socket(self, context):
             websocket_server_manager.stop_server()
         else:
             print("WebSocket server never started")
-
+            
+def run_asyncio_coroutine(coroutine):
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(coroutine)
+        loop.close()
+    except Exception as e:
+        print("Error in run_asyncio_coroutine:", e)
+          
 #Function to execute operators at given coordinates
 def execute_operators_at_coordinates(x,y,z,marker):
     
@@ -162,17 +171,19 @@ def execute_operators_at_coordinates(x,y,z,marker):
     if send_shape_to_webviewer:
         #Send message back to webviewer after execution
         asyncio.run(send_message_to_websocket("new_shape_available"))
-    
+        threading.Thread(target=run_asyncio_coroutine, args=(send_message_to_websocket("new_shape_available"),)).start()
+        
 #Function to send data to the websocket
 async def handle(websocket, path):
     global active_websockets
     active_websockets.add(websocket)
+    print("WebSocket connected:", websocket)
     try:
         while True:
             message = await websocket.recv()
             print(f"Received data: {message}")
             
-            # Parse the JSON data
+            #Parse the JSON data
             try:
                 data = json.loads(message)  #Parse the JSON message
                 if "message" in data:  #Check if 'message' key exists
@@ -185,12 +196,19 @@ async def handle(websocket, path):
                 print("Invalid data format")  
     finally:
         active_websockets.remove(websocket)
-        
-# Function to send data to all connected websockets
+
+#Function to send data to all connected websockets
 async def send_message_to_websocket(message):
-    if active_websockets:
-        await asyncio.wait([websocket.send(message) for websocket in active_websockets])
-          
+    try:
+        if active_websockets:
+            print("attempting to send message to websocket")
+            await asyncio.wait([websocket.send(message) for websocket in active_websockets])
+            print("Sent message: ", message, " to websockets")  
+        else:
+            print("No active websockets found")
+    except Exception as e:
+        print("Error sending message to websocket:", str(e))
+       
 #Function to send files over the websocket            
 async def send_file_over_websocket(websocket, file_path):
     with open(file_path, 'rb') as file:
@@ -225,7 +243,7 @@ async def handle(websocket, path):
             message = await websocket.recv()
             print(f"Received data: {message}")
             
-            # Parse the JSON data
+            #Parse the JSON data
             try:
                 data = json.loads(message)  #Parse the JSON message
                 if "message" in data:  #Check if 'message' key exists
@@ -239,7 +257,7 @@ async def handle(websocket, path):
     finally:
         active_websockets.remove(websocket)
         
-# Function to send data to all connected websockets
+#Function to send data to all connected websockets
 async def send_message_to_websocket(message):
     if active_websockets:
         await asyncio.wait([websocket.send(message) for websocket in active_websockets])
@@ -406,17 +424,17 @@ class CenterPointCloudOperator(bpy.types.Operator):
         #view3d.region_3d.view_rotation = bpy.context.scene.camera.rotation_euler  #Maintaining the current rotation
         view3d.region_3d.view_distance = viewport_height  #Distance from the view point
 
-        # Ensure there is an active camera in the scene
+        #Ensure there is an active camera in the scene
         if bpy.context.scene.camera:
             bpy.context.scene.camera.data.type = 'ORTHO' #Set the camera type to Orthographic, alternatively is PERSP for perspective
         for area in bpy.context.screen.areas:
             if area.type == 'VIEW_3D':
-                # Access the 3D View's region data
+                #Access the 3D View's region data
                 for space in area.spaces:
                     if space.type == 'VIEW_3D':
-                        # Set the viewport to Orthographic projection
+                        #Set the viewport to Orthographic projection
                         space.region_3d.view_perspective = 'ORTHO'
-                        break  # Exit the loop once the first 3D view is found and set
+                        break  #Exit the loop once the first 3D view is found and set
                     
         return {'FINISHED'}
 
@@ -845,7 +863,7 @@ class ComplexMarkOperator(bpy.types.Operator):
         return {'CANCELLED'}
     
     def execute(self, context):
-        # Use the external coordinates if provided
+        #Use the external coordinates if provided
         if hasattr(self, 'external_x') and hasattr(self, 'external_y') and hasattr(self, 'external_z'):
             location = Vector((self.external_x, self.external_y, 0))
             
@@ -967,12 +985,12 @@ class CurbDetectionOperator(bpy.types.Operator):
                 
                 if curb_points:
                     avg_lowest_point, avg_highest_point = calculate_adjusted_extreme_points(curb_points)
-                    # Draw lines at the adjusted highest and lowest curb points
+                    #Draw lines at the adjusted highest and lowest curb points
                     self.draw_curb_line(self.first_click_point, self.second_click_point, avg_highest_point, median_curb_point)
                     self.draw_curb_line(self.first_click_point, self.second_click_point, avg_lowest_point, median_curb_point)
                 else:
                     print("No curb points found")
-                    # Draw a single line from start to end point at default height
+                    #Draw a single line from start to end point at default height
                     self.draw_curb_line(self.first_click_point, self.second_click_point, extra_z_height)
                     
                 self._is_running = False
@@ -1004,13 +1022,13 @@ class CurbDetectionOperator(bpy.types.Operator):
 
         line_direction = np.array(second_click_point) - np.array(first_click_point)
         line_length = np.linalg.norm(line_direction)
-        line_direction /= line_length  # Normalize
+        line_direction /= line_length  #Normalize
         perp_direction = np.array([-line_direction[1], line_direction[0], 0])
         corridor_width = 0.25
         neighbor_search_distance = 0.2
 
         middle_point = (np.array(first_click_point) + np.array(second_click_point)) / 2
-        half_num_samples = int(5 * line_length)  # Half the number of samples on each side
+        half_num_samples = int(5 * line_length)  #Half the number of samples on each side
 
         #Function to check and add curb points
         def check_and_add_curb_points(sample_point):
@@ -1031,7 +1049,7 @@ class CurbDetectionOperator(bpy.types.Operator):
             check_and_add_curb_points(sample_point_left)
             check_and_add_curb_points(sample_point_right)
 
-            if len(curb_points_indices) >= 1000:  # Stop if the limit is reached
+            if len(curb_points_indices) >= 1000:  #Stop if the limit is reached
                 break
 
         #Extract unique indices as curb points may be found multiple times
@@ -1051,11 +1069,11 @@ class CurbDetectionOperator(bpy.types.Operator):
 
     #Function to draw a line between 2 points, trough the median curb point       
     def draw_curb_line(self, first_click_point, second_click_point, curb_height, median_curb_point=None):
-        # Create a new mesh and object
+        #Create a new mesh and object
         mesh = bpy.data.meshes.new(name="Curb Line")
         obj = bpy.data.objects.new("Curb Line", mesh)
 
-        # Link the object to the scene
+        #Link the object to the scene
         bpy.context.collection.objects.link(obj)
         bpy.context.view_layer.objects.active = obj
         obj.select_set(True)
@@ -1063,12 +1081,12 @@ class CurbDetectionOperator(bpy.types.Operator):
         if(median_curb_point is None):
             median_curb_point = (first_click_point + second_click_point) / 2
                                        
-        # Adjust the z-coordinates of the first, median, and second points to curb_height
+        #Adjust the z-coordinates of the first, median, and second points to curb_height
         adjusted_first_click = Vector((first_click_point.x, first_click_point.y, curb_height))
         adjusted_median_point = Vector((median_curb_point.x, median_curb_point.y, curb_height))
         adjusted_second_click = Vector((second_click_point.x, second_click_point.y, curb_height))
 
-        # Create a bmesh, add vertices, and create the edges
+        #Create a bmesh, add vertices, and create the edges
         bm = bmesh.new()
         v1 = bm.verts.new(adjusted_first_click)
         v2 = bm.verts.new(adjusted_median_point)
@@ -1076,7 +1094,7 @@ class CurbDetectionOperator(bpy.types.Operator):
         bm.edges.new((v1, v2))
         bm.edges.new((v2, v3))
 
-        # Update and free the bmesh
+        #Update and free the bmesh
         bm.to_mesh(mesh)
         bm.free()
            
@@ -1867,7 +1885,7 @@ class DashedLineMarkingOperator(bpy.types.Operator):
                 if self.first_cluster_center is not None and self.second_cluster_center is not None: #make sure the clusters are not empty
                     
                     self.connect_clusters(self.first_cluster_center, self.second_cluster_center)
-                     # Continue finding and connecting additional clusters
+                     #Continue finding and connecting additional clusters
                     self.extend_dashed_lines(points_kdtree, point_coords, point_colors, self.second_cluster_center, self.first_cluster_center, intensity_threshold)
                
                 self._is_running = False
@@ -1905,7 +1923,7 @@ class DashedLineMarkingOperator(bpy.types.Operator):
             print("No points above the intensity threshold")
             return None
         
-        # Check if filtered_points is empty before creating a dots shape
+        #Check if filtered_points is empty before creating a dots shape
         if len(filtered_points) > 0:
             create_dots_shape(filtered_points, "dash line", True)
         else:
@@ -1957,7 +1975,7 @@ class DashedLineMarkingOperator(bpy.types.Operator):
         line_direction = np.array(end_cluster_center) - np.array(start_cluster_center)
         line_length = np.linalg.norm(line_direction)
         line_direction /= line_length  #Normalize 
-        # Reverse the line direction
+        #Reverse the line direction
         line_direction = -line_direction
 
         print(f"Line direction: {line_direction}, Line length: {line_length}")
@@ -2112,7 +2130,7 @@ class FixedTriangleMarkOperator(bpy.types.Operator):
             return {'CANCELLED'}
         
     def execute(self, context):
-        # Use the external coordinates if provided
+        #Use the external coordinates if provided
         if hasattr(self, 'external_x') and hasattr(self, 'external_y') and hasattr(self, 'external_z'):
             location = Vector((self.external_x, self.external_y, self.external_z))
             draw_fixed_triangle(context, location, size=0.5)
@@ -2213,10 +2231,10 @@ class GetPointCloudData:
             print(f"Using classification code for GROUND: {ground_code}")
             use_ground_points_only=bpy.context.scene.ground_only
             if use_ground_points_only:
-                # Filter points based on classification
+                #Filter points based on classification
                 ground_points_mask = point_cloud.classification == ground_code
                 if ground_points_mask.any():
-                    # Applying the ground points mask
+                    #Applying the ground points mask
                     points_a = np.vstack((point_cloud.x[ground_points_mask], 
                                         point_cloud.y[ground_points_mask], 
                                         point_cloud.z[ground_points_mask])).transpose()
@@ -2291,7 +2309,7 @@ class GetPointCloudData:
   
         #Function to save KD-tree with pickle and gzip
         def save_kdtree_pickle_gzip(file_path, kdtree):
-            with gzip.open(file_path, 'wb', compresslevel=1) as f:  # compresslevel from 1-9, low-high compression
+            with gzip.open(file_path, 'wb', compresslevel=1) as f:  #compresslevel from 1-9, low-high compression
                 pickle.dump(kdtree, f)
         #Function to load KD-tree with pickle and gzip
         def load_kdtree_pickle_gzip(file_path):
@@ -2342,7 +2360,7 @@ class GetPointCloudData:
                     {"pos": coords, "color": colors}
                 )
                 
-                # the draw function
+                #the draw function
                 def draw():
                     gpu.state.point_size_set(point_size)
                     bgl.glEnable(bgl.GL_DEPTH_TEST)
@@ -2413,7 +2431,7 @@ def is_mouse_in_3d_view(context, event):
 
 #function to get 3D click point
 def get_click_point_in_3d(context, event):
-    # Convert the mouse position to 3D space
+    #Convert the mouse position to 3D space
     coord_3d = view3d_utils.region_2d_to_location_3d(
         context.region, context.space_data.region_3d,
         (event.mouse_region_x, event.mouse_region_y),
@@ -2453,40 +2471,47 @@ def save_kdtree_to_file(file_path, kdtree):
 #Function to store obj state
 def prepare_object_for_export(obj):
     
-    # Check if the necessary context attributes are available
-    if 'selected_objects' not in dir(bpy.context) or 'view_layer' not in dir(bpy.context):
-        print("Required context attributes are not available.")
-        return None
-
-    # check to ensure the object is valid
+    global collection_name
+    #Get the path of the current Blender file
+    blend_file_path = bpy.data.filepath
+    directory = os.path.dirname(blend_file_path)
+    shapes_dir = os.path.join(directory, "webbased poc/static/objects")
+    
+    #check to ensure the object is valid
     if obj is None:
         print("Invalid object for export.")
         return None
-    
-    try:
-        bpy.context.view_layer.objects.active = obj  #Set as active object
-        bpy.ops.object.mode_set(mode='OBJECT') #force object mode
-        bpy.ops.object.select_all(action='DESELECT')  #Deselect all objects
-        obj.select_set(True)  #Select the current object
 
-        set_origin_to_geometry_center(obj)
-        
-        save_shape_checkbox = bpy.context.scene.save_shape
-        if(save_shape_checkbox):
-            save_shape_as_image(obj)
+    #Check if the necessary context attributes are available
+    if 'selected_objects' not in dir(bpy.context) or 'view_layer' not in dir(bpy.context):
+        print("Required context attributes are not available.")
+        #When functions get called outside of the UI, export without using the context but using the collection
+        export_objects_from_collection(collection_name, shapes_dir)
+    #when functions get called from the UI, export using the context
+    else:
+        try:
+            bpy.context.view_layer.objects.active = obj  #Set as active object
+            bpy.ops.object.mode_set(mode='OBJECT') #force object mode
+            bpy.ops.object.select_all(action='DESELECT')  #Deselect all objects
+            obj.select_set(True)  #Select the current object
+            obj=set_origin_to_geometry_center(obj)
+            save_shape_checkbox = bpy.context.scene.save_shape
+            if(save_shape_checkbox):
+                save_shape_as_image(obj)
+                
+            save_obj_checkbox = bpy.context.scene.save_obj
+            if(save_obj_checkbox):
+                export_shape_as_obj(obj, obj.name,directory)
+                
+        except Exception as e:
+            print(f"Error during preparation for export: {e}")
+            return None
             
-        save_obj_checkbox = bpy.context.scene.save_obj
-        if(save_obj_checkbox):
-            export_shape_as_obj(obj, obj.name)
-            
-    except Exception as e:
-        print(f"Error during preparation for export: {e}")
-        return None
-        
 #Function to export objects as OBJ files 
-def export_shape_as_obj(obj, name):
+def export_shape_as_obj(obj, name, directory):
     
     #global properties from context
+    global collection_name
     marking_color = bpy.context.scene.marking_color 
     transparency = bpy.context.scene.marking_transparency
     shape_material = bpy.data.materials.new(name="shape_material")
@@ -2498,10 +2523,6 @@ def export_shape_as_obj(obj, name):
     else:
         obj.data.materials.append(shape_material)
         
-    #Get the path of the current Blender file
-    blend_file_path = bpy.data.filepath
-    directory = os.path.dirname(blend_file_path)
-
     #Create the 'shape objects' directory if it doesn't exist
     shapes_dir = os.path.join(directory, "shape objects")
     if not os.path.exists(shapes_dir):
@@ -2516,17 +2537,10 @@ def export_shape_as_obj(obj, name):
 
     #Export the object to an OBJ file
     bpy.ops.export_scene.obj(filepath=obj_file_path, use_selection=True,use_materials=True)
-    
-    save_obj_for_webviewer=True
-    if(save_obj_for_webviewer):
-        shapes_dir = os.path.join(directory, "webbased poc/objects")
-        obj_file_path = os.path.join(shapes_dir, "shape.obj")
-        bpy.ops.export_scene.obj(filepath=obj_file_path, use_selection=True,use_materials=True)
-        
     obj.select_set(False)
-    
+ 
 #Function to set origin to geometry center based on an object
-def set_origin_to_geometry_center(obj):
+def set_origin_to_geometry_center(obj, return_obj=True):
     if obj.type == 'MESH':
         #For mesh objects, use the built-in function
         bpy.ops.object.origin_set(type='ORIGIN_GEOMETRY', center='BOUNDS')
@@ -2543,6 +2557,69 @@ def set_origin_to_geometry_center(obj):
             obj.data.transform(Matrix.Translation(global_bbox_center))
             if hasattr(obj.data, "update"):
                 obj.data.update()
+                
+    if return_obj:
+        return obj
+
+def export_mesh_to_obj(mesh, file_path, mtl_name):
+    #Open the file for writing the OBJ file
+    with open(file_path, 'w') as file:
+        file.write(f"mtllib {mtl_name}.mtl\n")  # MTL file reference
+
+        #Write vertices
+        for vertex in mesh.vertices:
+            file.write(f"v {vertex.co.x} {vertex.co.y} {vertex.co.z}\n")
+
+        #Write faces (assuming the mesh is using the same material)
+        file.write(f"usemtl {mtl_name}\n")  #Use the material
+        for face in mesh.polygons:
+            vertices = face.vertices[:]
+            face_line = "f"
+            for vert in vertices:
+                face_line += f" {vert + 1}"  # OBJ files are 1-indexed
+            file.write(f"{face_line}\n")
+
+def export_material_to_mtl(mtl_path, mtl_name):
+    #Open the file for writing the MTL file
+    with open(mtl_path, 'w') as file:
+        #Define a simple red material
+        file.write(f"newmtl {mtl_name}\n")
+        file.write("Ns 10.0000\n")  #Specular exponent
+        file.write("Ka 1.0000 0.0000 0.0000\n")  #Ambient color (red)
+        file.write("Kd 1.0000 0.0000 0.0000\n")  #Diffuse color (red)
+        file.write("Ks 0.5000 0.5000 0.5000\n")  #Specular color 
+        file.write("Ni 1.4500\n")  # Optical density 
+        file.write("d 1.0000\n")  # transparency
+        file.write("illum 2\n")  # Illumination 
+
+def export_objects_from_collection(collection_name, export_directory):
+    # Ensure the export directory exists
+    os.makedirs(export_directory, exist_ok=True)
+
+    # Retrieve the collection
+    collection = bpy.data.collections.get(collection_name)
+    if not collection:
+        print(f"Collection '{collection_name}' not found")
+        return
+
+    #Iterate over objects in the collection
+    for obj in collection.objects:
+        #Check if object is a mesh
+        if obj.type == 'MESH':
+            obj=set_origin_to_geometry_center(obj)
+            #Define file paths for the OBJ and MTL files
+            obj_file_path = os.path.join(export_directory, f"{obj.name}.obj")
+            mtl_file_path = os.path.join(export_directory, f"{obj.name}.mtl")
+            print(f"Exporting {obj.name} to {obj_file_path} and {mtl_file_path}")
+
+            #Apply transformations and get mesh data
+            mesh = obj.to_mesh()
+            export_mesh_to_obj(mesh, obj_file_path, obj.name)
+            obj.to_mesh_clear()  #Clear the temporary mesh data
+
+            #Export the material
+            export_material_to_mtl(mtl_file_path, obj.name)
+
 
 #Function to force top view in the viewport
 def set_view_to_top(context):
@@ -2878,10 +2955,10 @@ def create_polyline(points,name='Poly Line', width=0.01, color=(1, 0, 0, 1)):
 
 #Function to create segments of a given size out of points
 def create_fixed_length_segments(points, segment_length=1.0):
-    # function generates points on a polyline with fixed segment lengths
-    extended_points = [Vector(points[0])]  # Start with the first point
-    total_distance = 0  # Keep track of the total distance
-    segment_count = 0  # Count the number of full segments
+    #function generates points on a polyline with fixed segment lengths
+    extended_points = [Vector(points[0])]  #Start with the first point
+    total_distance = 0  #Keep track of the total distance
+    segment_count = 0  #Count the number of full segments
 
     for i in range(1, len(points)):
         start_point = Vector(points[i - 1])
@@ -2901,7 +2978,7 @@ def create_fixed_length_segments(points, segment_length=1.0):
             segment_distance -= segment_length
             segment_count += 1
 
-        # Add the last point if it doesn't fit a full segment
+        #Add the last point if it doesn't fit a full segment
         if segment_distance > 0:
             extended_points.append(end_point)
 
@@ -2909,7 +2986,7 @@ def create_fixed_length_segments(points, segment_length=1.0):
     if total_distance % segment_length != 0:
         extended_points[-1] = extended_points[-2] + segment_vector * (total_distance % segment_length)
 
-    return extended_points, total_distance, segment_count + 1  # Include the last partial segment
+    return extended_points, total_distance, segment_count + 1  #Include the last partial segment
 
 #Function to create different shapes out of points
 def create_shape(coords_list, shape_type,vertices=None,filter_coords=True):
@@ -3035,7 +3112,7 @@ def draw_line(self, context, event,point_coords, point_colors, points_kdtree):
 def find_cluster_center(context, click_point, direction, range,point_coords, point_colors, points_kdtree):
     intensity_threshold = context.scene.intensity_threshold
    
-    # Define the search bounds and find points within the bounds
+    #Define the search bounds and find points within the bounds
     upper_bound = click_point + direction * range
     lower_bound = click_point - direction * range
     indices = points_kdtree.query_ball_point([upper_bound, lower_bound], range)
@@ -3044,16 +3121,16 @@ def find_cluster_center(context, click_point, direction, range,point_coords, poi
     high_intensity_points = potential_points[np.average(point_colors[indices], axis=1) > intensity_threshold]
 
     if len(high_intensity_points) > 0:
-        # Find the outer points
+        #Find the outer points
         min_x = np.min(high_intensity_points[:, 0])
         max_x = np.max(high_intensity_points[:, 0])
         min_y = np.min(high_intensity_points[:, 1])
         max_y = np.max(high_intensity_points[:, 1])
 
-        # Calculate the center of these extremal points
+        #Calculate the center of these extremal points
         center_x = (min_x + max_x) / 2
         center_y = (min_y + max_y) / 2
-        center_z = np.mean(high_intensity_points[:, 2])  # Average Z value
+        center_z = np.mean(high_intensity_points[:, 2])  #Average Z value
   
         mark_point(Vector((center_x, center_y, center_z)), "cluster_center")
         return Vector((center_x, center_y, center_z))
@@ -3302,11 +3379,11 @@ def filter_noise_with_dbscan(coords_list, eps=0.04, min_samples=20):
     #DBSCAN clustering
     db = DBSCAN(eps=eps, min_samples=min_samples).fit(coords_list)
 
-    # Create a mask for the points belonging to clusters (excluding noise labeled as -1)
+    #Create a mask for the points belonging to clusters (excluding noise labeled as -1)
     core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
     core_samples_mask[db.core_sample_indices_] = True
 
-    # Filter the coordinates: keep only those points that are part of a cluster
+    #Filter the coordinates: keep only those points that are part of a cluster
     filtered_coords = [
         coords for coords, is_core in zip(coords_list, core_samples_mask) if is_core
     ]
@@ -3356,25 +3433,25 @@ def get_average_color(indices,point_colors):
  
 #Function to move triangle to a line
 def move_triangle_to_line(triangle, line_start, line_end):
-    # Convert inputs to numpy arrays for easier calculations
+    #Convert inputs to numpy arrays for easier calculations
     triangle_np = np.array(triangle)
     line_start_np = np.array(line_start)
     line_end_np = np.array(line_end)
 
-    # Identify the base vertices (the two closest to the line)
+    #Identify the base vertices (the two closest to the line)
     base_vertex_indices = find_base_vertices(triangle_np, line_start_np, line_end_np)
     base_vertices = triangle_np[base_vertex_indices]
 
-    # Find the closest points on the line for the base vertices
+    #Find the closest points on the line for the base vertices
     closest_points = [
         closest_point(vertex, line_start_np, line_end_np) for vertex in base_vertices
     ]
 
-    # Move the base vertices to the closest points on the line
+    #Move the base vertices to the closest points on the line
     triangle_np[base_vertex_indices] = closest_points
 
     #Calculate the height of the triangle to reposition the third vertex
-    third_vertex_index = 3 - sum(base_vertex_indices)  # indices should be 0, 1, 2
+    third_vertex_index = 3 - sum(base_vertex_indices)  #indices should be 0, 1, 2
     height_vector = triangle_np[third_vertex_index] - np.mean(base_vertices, axis=0)
     triangle_np[third_vertex_index] = np.mean(closest_points, axis=0) + height_vector
 
@@ -3387,7 +3464,7 @@ def find_base_vertices(triangle, line_start, line_end):
         for vertex in triangle
     ]
     sorted_indices = np.argsort(distances)
-    return sorted_indices[:2]  # Indices of the two closest vertices
+    return sorted_indices[:2]  #Indices of the two closest vertices
 
 #Function to find the closest vertex to a line
 def find_closest_vertex_to_line(triangle, line_start, line_end):
@@ -3482,7 +3559,7 @@ def find_cluster_points(context, click_point, direction, range,point_coords,poin
 
     return None
 
-# function to calculate middle points of a line
+#function to calculate middle points of a line
 def create_middle_points(coords_list, num_segments=10):
     coords_np = np.array(coords_list)
 
@@ -3499,33 +3576,33 @@ def create_middle_points(coords_list, num_segments=10):
     top_right = rightmost_points[rightmost_points[:, 1].argmax()]
     bottom_right = rightmost_points[rightmost_points[:, 1].argmin()]
 
-    # Initialize the middle points list with the leftmost middle point
+    #Initialize the middle points list with the leftmost middle point
     middle_points = [(top_left + bottom_left) / 2]
 
     #Divide the remaining line into segments
     segment_width = (rightmost_x - leftmost_x) / (num_segments - 1)
 
     for i in range(1, num_segments):
-        # Determine the segment boundaries
+        #Determine the segment boundaries
         x_min = leftmost_x + i * segment_width
         x_max = leftmost_x + (i + 1) * segment_width
 
-        # Filter points in the current segment
+        #Filter points in the current segment
         segment_points = coords_np[
             (coords_np[:, 0] >= x_min) & (coords_np[:, 0] < x_max)
         ]
 
         if len(segment_points) > 0:
-            # Find the top and bottom points in this segment
+            #Find the top and bottom points in this segment
             top_point = segment_points[segment_points[:, 1].argmax()]
             bottom_point = segment_points[segment_points[:, 1].argmin()]
 
-            # Calculate the middle point
+            #Calculate the middle point
             middle_point = (top_point + bottom_point) / 2
             middle_points.append(middle_point)
             mark_point(middle_point, "middle_point")
 
-    # Add the rightmost middle point at the end
+    #Add the rightmost middle point at the end
     middle_points.append((top_right + bottom_right) / 2)
 
     mark_point(top_left, "top_left")
@@ -3537,21 +3614,21 @@ def create_middle_points(coords_list, num_segments=10):
 
 #Function to Find the four corner points of the rectangle formed by the given points.
 def find_rectangle_corners(points):
-    # Extract X and Y coordinates
+    #Extract X and Y coordinates
     x_coords = points[:, 0]
     y_coords = points[:, 1]
 
-    # Find extremal values for X and Y coordinates
+    #Find extremal values for X and Y coordinates
     min_x, max_x = np.min(x_coords), np.max(x_coords)
     min_y, max_y = np.min(y_coords), np.max(y_coords)
 
-    # Define corners based on extremal points
+    #Define corners based on extremal points
     bottom_left = np.array([min_x, min_y])
     bottom_right = np.array([max_x, min_y])
     top_right = np.array([max_x, max_y])
     top_left = np.array([min_x, max_y])
 
-    # Combine corners into a single array
+    #Combine corners into a single array
     corners = np.array([bottom_left, bottom_right, top_right, top_left])
     for corner in corners:
         mark_point(corner, "corner")
@@ -3559,18 +3636,18 @@ def find_rectangle_corners(points):
 
 #Function to calculate the middle line of the rectangle formed by the corners.
 def calculate_middle_line(corners):
-    # Calculate the midpoints of opposite sides
+    #Calculate the midpoints of opposite sides
     midpoint_left = (
         corners[0] + corners[3]
-    ) / 2  # Midpoint of bottom_left and top_left
+    ) / 2  #Midpoint of bottom_left and top_left
     midpoint_right = (
         corners[1] + corners[2]
-    ) / 2  # Midpoint of bottom_right and top_right
+    ) / 2  #Midpoint of bottom_right and top_right
     mark_point(midpoint_left, "midpoint1")
     mark_point(midpoint_right, "midpoint2")
     return midpoint_left, midpoint_right
 
-# function to snap the drawn line to the center line of the rectangle formed by the cluster.
+#function to snap the drawn line to the center line of the rectangle formed by the cluster.
 def snap_line_to_center_line(first_click_point, second_click_point, cluster):
     corners = find_rectangle_corners(cluster)
     line_start, line_end = calculate_middle_line(corners)
@@ -3619,7 +3696,7 @@ def calculate_adjusted_extreme_points(points):
 
 #Function that defines a region growing algoritm
 def region_growing(point_coords,point_colors,points_kdtree,nearest_indices,radius,intensity_threshold,region_growth_coords):
-    # Region growing algorithm
+    #Region growing algorithm
     start_time = time.time()
     checked_indices = set()
     indices_to_check = list(nearest_indices[0])
@@ -4063,13 +4140,13 @@ def register():
     bpy.types.Scene.save_obj = bpy.props.BoolProperty(
         name="Save shape objects",
         description="Saves an OBJ file of each shape",
-        default=False,
+        default=True,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.auto_load = bpy.props.BoolProperty(
         name="Auto load auto.laz",
         description="Auto loads auto.laz on every exectuion",
-        default=False,
+        default=True,
         subtype='UNSIGNED'  
     )
     bpy.types.Scene.show_dots = bpy.props.BoolProperty(
@@ -4133,7 +4210,7 @@ def register():
     bpy.types.Scene.connect_socket= bpy.props.BoolProperty(
         name="Enable websocket",
         description="Open a websocket connection to the webviewer",
-        default=False,
+        default=True,
         update=update_connect_socket
     )
 #Unregister the operators and panel                                    
