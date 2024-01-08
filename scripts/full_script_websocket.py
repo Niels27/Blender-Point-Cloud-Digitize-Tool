@@ -628,7 +628,7 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
     def draw_line(self, context, event):
         
         marking_color = context.scene.marking_color
-        width = context.scene.fatline_width
+        width = context.scene.line_width
         extra_z_height = context.scene.extra_z_height
         
         region = context.region
@@ -741,7 +741,7 @@ class SimpleMarkOperator(bpy.types.Operator):
                 
             if region_growth_coords:
                 #Create a single mesh for the combined  rectangles
-                create_shape(region_growth_coords,shape_type="unkown")
+                create_shape(region_growth_coords, shape_type="unknown")
                 
         elif event.type == 'ESC':
             SimpleMarkOperator._is_running = False
@@ -1766,7 +1766,7 @@ class AutoRectangleMarkOperator(bpy.types.Operator):
                 rectangle_vertices = create_flexible_rectangle(rectangle_points)
                 self._rectangles.append(rectangle_vertices)
                 self._found_rectangles += 1
-                create_shape(filtered_points, shape_type="rectangle")
+                create_shape(filtered_points, shape_type="rectangle",filter_coords=False)
         
     def interpolate_line(self, start, end, num_points=20):
         #Generate points along the line between start and end
@@ -2988,60 +2988,92 @@ def create_fixed_length_segments(points, segment_length=1.0):
 
     return extended_points, total_distance, segment_count + 1  #Include the last partial segment
 
-#Function to create different shapes out of points
-def create_shape(coords_list, shape_type,vertices=None,filter_coords=True):
-    
-    start_time = time.time()
-    marking_color = bpy.context.scene.marking_color 
-    transparency = bpy.context.scene.marking_transparency
-    line_width = bpy.context.scene.fatline_width
-    shape_coords = None  #Default to original coordinates
-    if filter_coords:
-        coords_list=filter_noise_with_dbscan(coords_list,eps=bpy.context.scene.filter_distance, min_samples=bpy.context.scene.filter_neighbors)
-    
-    if shape_type == "triangle":
-        #flexible_coords = create_flexible_triangle(coords_list)
-        vertices=create_fixed_triangle(vertices)
-        obj=create_mesh_with_material(
-            "Triangle Shape", vertices,
-            marking_color, transparency)
-        create_triangle_outline(vertices)
+#Class defining the factory design pattern for creating shapes
+class ShapeFactory:
+    def __init__(self):
+        self.marking_color = bpy.context.scene.marking_color
+        self.transparency = bpy.context.scene.marking_transparency
+        self.line_width = bpy.context.scene.line_width
+        self.eps=bpy.context.scene.filter_distance
+        self.min_samples=bpy.context.scene.filter_neighbors
         
-    elif shape_type == "flexible triangle":
-        vertices = create_flexible_triangle(coords_list)
-        obj=create_mesh_with_material(
-            "flexible triangle", vertices,
-            marking_color, transparency)
-        create_triangle_outline(vertices)
-        print("Drawing flexible triangle")
-             
-    elif shape_type == "rectangle":
-        print("Drawing rectangle")
-        shape_coords = create_flexible_rectangle(coords_list)
-        #shape_coords=create_fixed_rectangle_old(shape_coords)
-        obj=create_mesh_with_material(
-            "rectangle Shape", shape_coords,
-            marking_color, transparency)
-        
-    elif shape_type == "curved line":
-        print("Drawing curved line")
-        middle_points = create_middle_points(coords_list)
+    def create_shape(self, coords_list, vertices=None, filter_coords=True):
+        raise NotImplementedError("This method should be overridden in subclasses")
+    def filter_coords(self, coords_list):
+        return filter_noise_with_dbscan(coords_list,self.eps,self.min_samples)
+    def finalize_shape(self, obj):
+        prepare_object_for_export(obj)  
 
+class TriangleShapeFactory(ShapeFactory):
+    def create_shape(self, coords_list, vertices=None, filter_coords=True):
+        if(filter_coords):
+            coords_list = self.filter_coords(coords_list)
+        vertices=create_fixed_triangle(vertices)
+        obj=create_mesh_with_material("Triangle Shape", vertices,self.marking_color, self.transparency)
+        create_triangle_outline(vertices)
+        self.finalize_shape(obj)
+        
+class FlexibleTriangleShapeFactory(ShapeFactory):
+    def create_shape(self,coords_list, vertices=None, filter_coords=True):
+        if(filter_coords):
+            coords_list = self.filter_coords(coords_list)
+        vertices = create_flexible_triangle(coords_list)
+        obj=create_mesh_with_material("flexible triangle", vertices, self.marking_color, self.transparency)
+        create_triangle_outline(vertices)
+        self.finalize_shape(obj)
+        print("Drawing flexible triangle")
+
+class RectangleShapeFactory(ShapeFactory):
+    def create_shape(self,coords_list,vertices=None, filter_coords=True):
+        if(filter_coords):
+            coords_list = self.filter_coords(coords_list)        
+        print("Drawing rectangle")
+        print("points amount", len(coords_list))
+        shape_coords = create_flexible_rectangle(coords_list)
+        obj=create_mesh_with_material("rectangle Shape", shape_coords,self.marking_color, self.transparency)
+        self.finalize_shape(obj)
+        
+class CurvedLineShapeFactory(ShapeFactory):
+    def create_shape(self,coords_list,vertices=None, filter_coords=True):
+        if(filter_coords):
+            coords_list = self.filter_coords(coords_list)        
+        print("Drawing curved line")
+        print("points amount", len(coords_list))
+        middle_points = create_middle_points(coords_list)
         fixed_length_points, total_length, segments = create_fixed_length_segments(middle_points)
         print(f"Total line length: {total_length:.2f} meters")
         print(f"Segmented lines drawn: {segments}")
-
-        obj=create_polyline(middle_points,  width=line_width, color=(marking_color[0], marking_color[1], marking_color[2], transparency))
-   
-    else:
-        print("Drawing unkown Shape")
-        obj=create_mesh_with_material(
-            "Unkown Shape", coords_list,
-            marking_color, transparency)
+        obj=create_polyline(middle_points,  width=self.line_width, color=(self.marking_color[0], self.marking_color[1], self.marking_color[2], self.transparency))
+        self.finalize_shape(obj)
         
-    print(f"Rendered {shape_type} shape in: {time.time() - start_time:.2f} seconds")
-    prepare_object_for_export(obj)
-    
+class UnknownShapeFactory(ShapeFactory):
+    def create_shape(self,coords_list,vertices=None,filter_coords=True):
+        if(filter_coords):
+            coords_list = self.filter_coords(coords_list)        
+        print("Drawing unkown Shape")
+        obj=create_mesh_with_material("Unkown Shape", coords_list,self.marking_color, self.transparency)
+        self.finalize_shape(obj)
+        
+def create_shape(coords_list, shape_type, vertices=None, filter_coords=True):
+
+    factory = None
+  
+    if shape_type == "triangle":
+        factory = TriangleShapeFactory()
+    elif shape_type == "flexible triangle":
+        factory = FlexibleTriangleShapeFactory()
+    elif shape_type == "rectangle":
+        factory = RectangleShapeFactory()
+    elif shape_type == "curved line":
+        factory = CurvedLineShapeFactory()
+    elif shape_type == "unknown":
+        factory = UnknownShapeFactory()
+        
+    if factory:
+         return factory.create_shape(coords_list, vertices, filter_coords)
+    else:
+        print(f"Shape type '{shape_type}' is not recognized.")
+        
 #Function to create a mesh object
 def create_mesh_with_material(obj_name, shape_coords, marking_color, transparency):
     
@@ -3144,7 +3176,7 @@ def create_rectangle_line_object(start, end):
     marking_color = context.scene.marking_color
     transparency = context.scene.marking_transparency
     extra_z_height = context.scene.extra_z_height
-    width = context.scene.fatline_width
+    width = context.scene.line_width
     #Calculate the direction vector and its length
     direction = end - start
 
@@ -3220,9 +3252,9 @@ def create_dots_shape(coords_list,name="Dots Shape", filter_points=True):
 
     bm = bmesh.new()
 
-    square_size = 0.025  #Size of each square
+    square_size = 0.05  #Size of each square
     z_offset = extra_z_height  #Offset in Z coordinate
-    max_gap = 10  #Maximum gap size to fill
+    max_gap = 100  #Maximum gap size to fill
 
     if filter_points:
         #filters out bad points
@@ -3375,8 +3407,10 @@ def snap_line_to_road_mark(self, context, first_click_point, last_click_point,po
 
 #Math functions
 #function to filter bad points
-def filter_noise_with_dbscan(coords_list, eps=0.04, min_samples=20):
+def filter_noise_with_dbscan(coords_list, eps=0.15, min_samples=20):
     #DBSCAN clustering
+    eps=float(eps)
+    min_samples=int(min_samples)
     db = DBSCAN(eps=eps, min_samples=min_samples).fit(coords_list)
 
     #Create a mask for the points belonging to clusters (excluding noise labeled as -1)
@@ -3695,7 +3729,7 @@ def calculate_adjusted_extreme_points(points):
     return avg_lowest_point, avg_highest_point
 
 #Function that defines a region growing algoritm
-def region_growing(point_coords,point_colors,points_kdtree,nearest_indices,radius,intensity_threshold,region_growth_coords):
+def region_growing(point_coords,point_colors,points_kdtree,nearest_indices,radius,intensity_threshold,region_growth_coords, time_limit=10):
     #Region growing algorithm
     start_time = time.time()
     checked_indices = set()
@@ -3704,7 +3738,7 @@ def region_growing(point_coords,point_colors,points_kdtree,nearest_indices,radiu
     while indices_to_check:
         current_time = time.time()
         #Check if 30 seconds have passed
-        if current_time - start_time > 15:
+        if current_time - start_time > time_limit:
             print("Region growing stopped due to time limit.")
             break
         current_index = indices_to_check.pop()
@@ -3991,7 +4025,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row.operator("custom.auto_curved_line", text="Auto line marker") 
         row = layout.row()
         row.prop(scene, "snap_to_road_mark")
-        row.prop(scene, "fatline_width")
+        row.prop(scene, "line_width")
        
         layout.operator("custom.dashed_line_marking_operator", text="Dash line marker") 
         layout.operator("custom.curb_detection_operator", text="Curb marker") 
@@ -4097,7 +4131,7 @@ def register():
         max=1, 
         subtype='UNSIGNED' 
     )
-    bpy.types.Scene.fatline_width = bpy.props.FloatProperty(
+    bpy.types.Scene.line_width = bpy.props.FloatProperty(
         name="Line width",
         description="Fat Line Width",
         default=0.10,
@@ -4248,7 +4282,7 @@ def unregister():
     del bpy.types.Scene.marking_color
     del bpy.types.Scene.intensity_threshold
     del bpy.types.Scene.markings_threshold
-    del bpy.types.Scene.fatline_width
+    del bpy.types.Scene.line_width
     del bpy.types.Scene.user_input_result
     del bpy.types.Scene.save_shape
     del bpy.types.Scene.save_obj

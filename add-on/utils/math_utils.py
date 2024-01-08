@@ -19,8 +19,10 @@ from scipy.interpolate import UnivariateSpline, make_interp_spline, CubicSpline
 
 #Math functions
 #function to filter bad points
-def filter_noise_with_dbscan(coords_list, eps=0.04, min_samples=20):
+def filter_noise_with_dbscan(coords_list, eps=0.1, min_samples=20):
     #DBSCAN clustering
+    eps=float(eps)
+    min_samples=int(min_samples)
     db = DBSCAN(eps=eps, min_samples=min_samples).fit(coords_list)
 
     # Create a mask for the points belonging to clusters (excluding noise labeled as -1)
@@ -339,7 +341,7 @@ def calculate_adjusted_extreme_points(points):
     return avg_lowest_point, avg_highest_point
 
 #Function that defines a region growing algoritm
-def region_growing(point_coords,point_colors,points_kdtree,nearest_indices,radius,intensity_threshold,region_growth_coords):
+def region_growing(point_coords,point_colors,points_kdtree,nearest_indices,radius,intensity_threshold,region_growth_coords,time_limit=10):
     # Region growing algorithm
     start_time = time.time()
     checked_indices = set()
@@ -348,7 +350,7 @@ def region_growing(point_coords,point_colors,points_kdtree,nearest_indices,radiu
     while indices_to_check:
         current_time = time.time()
         #Check if 30 seconds have passed
-        if current_time - start_time > 15:
+        if current_time - start_time > time_limit:
             print("Region growing stopped due to time limit.")
             break
         current_index = indices_to_check.pop()

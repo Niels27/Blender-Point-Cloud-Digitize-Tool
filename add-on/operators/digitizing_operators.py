@@ -48,7 +48,7 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
 
     def draw_line(self, context, event):
         marking_color = context.scene.marking_color
-        width = context.scene.fatline_width
+        width = context.scene.line_width
         extra_z_height = context.scene.extra_z_height
 
         region = context.region
@@ -202,7 +202,7 @@ class SimpleMarkOperator(bpy.types.Operator):
 
             if region_growth_coords:
                 # Create a single mesh for the combined  rectangles
-                create_shape(region_growth_coords, shape_type="unkown")
+                create_shape(region_growth_coords, shape_type="unknown")
 
         elif event.type == "ESC":
             SimpleMarkOperator._is_running = False
@@ -401,7 +401,7 @@ class ComplexMarkOperator(bpy.types.Operator):
 
 
 # Operator to scans the entire point cloud for road markings, then mark them
-class FindALlRoadMarkingsOperator(bpy.types.Operator):
+class FindALLRoadMarkingsOperator(bpy.types.Operator):
     bl_idname = "custom.find_all_road_marks"
     bl_label = "Finds all road marks"
     bl_description = "Finds all road marks up to a max and marks them"
@@ -2077,10 +2077,8 @@ class FixedRectangleMarkOperator(bpy.types.Operator):
 
 # module imports
 from ..utils.blender_utils import (
-    GetPointCloudData,
     is_mouse_in_3d_view,
     set_view_to_top,
-    get_click_point_in_3d,
     prepare_object_for_export,
 )
 from ..utils.math_utils import calculate_adjusted_extreme_points
@@ -2103,3 +2101,5 @@ from ..utils.math_utils import (
     move_triangle_to_line,
     region_growing,
 )
+from ..utils.pointcloud_utils import GetPointCloudData
+

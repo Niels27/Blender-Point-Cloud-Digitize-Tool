@@ -45,7 +45,8 @@ print(sys.version)
 from .utils.websocket_utils import *
 from .operators.utility_operators import *
 from .operators.digitizing_operators import *
-from . UI.panel import DIGITIZE_PT_Panel
+from . UI.panel import AddOnPanel, PopUpOperator
+
 
 
             
@@ -55,7 +56,7 @@ def register():
     bpy.utils.register_class(CreatePointCloudObjectOperator)
     bpy.utils.register_class(DrawStraightFatLineOperator)
     bpy.utils.register_class(RemoveAllMarkingsOperator)
-    bpy.utils.register_class(DIGITIZE_PT_Panel)
+    bpy.utils.register_class(AddOnPanel)
     bpy.utils.register_class(RemovePointCloudOperator)
     bpy.utils.register_class(GetPointsInfoOperator)
     bpy.utils.register_class(SimpleMarkOperator)
@@ -73,7 +74,7 @@ def register():
     bpy.utils.register_class(PopUpOperator)
     bpy.utils.register_class(CenterPointCloudOperator)
     bpy.utils.register_class(ExportToShapeFileOperator)
-    bpy.utils.register_class(FindALlRoadMarkingsOperator)
+    bpy.utils.register_class(FindALLRoadMarkingsOperator)
     bpy.utils.register_class(DashedLineMarkingOperator)
 
     
@@ -110,7 +111,7 @@ def register():
         max=1, 
         subtype='UNSIGNED' 
     )
-    bpy.types.Scene.fatline_width = bpy.props.FloatProperty(
+    bpy.types.Scene.line_width = bpy.props.FloatProperty(
         name="Line width",
         description="Fat Line Width",
         default=0.10,
@@ -228,14 +229,14 @@ def unregister():
     bpy.utils.unregister_class(LAS_OT_OpenOperator) 
     bpy.utils.unregister_class(DrawStraightFatLineOperator)
     bpy.utils.unregister_class(RemoveAllMarkingsOperator)
-    bpy.utils.unregister_class(DIGITIZE_PT_Panel)
+    bpy.utils.unregister_class(AddOnPanel)
     bpy.utils.unregister_class(RemovePointCloudOperator)
     bpy.utils.unregister_class(GetPointsInfoOperator)
     
     bpy.utils.unregister_class(SimpleMarkOperator)
     bpy.utils.unregister_class(ComplexMarkOperator)
     bpy.utils.unregister_class(SelectionDetectionOpterator)
-    bpy.utils.unregister_class(FindALlRoadMarkingsOperator)  
+    bpy.utils.unregister_class(FindALLRoadMarkingsOperator)  
     bpy.utils.unregister_class(FixedTriangleMarkOperator)
     bpy.utils.unregister_class(FixedRectangleMarkOperator) 
     bpy.utils.unregister_class(TriangleMarkOperator)
@@ -256,7 +257,7 @@ def unregister():
     del bpy.types.Scene.marking_color
     del bpy.types.Scene.intensity_threshold
     del bpy.types.Scene.markings_threshold
-    del bpy.types.Scene.fatline_width
+    del bpy.types.Scene.line_width
     del bpy.types.Scene.user_input_result
     del bpy.types.Scene.save_shape
     del bpy.types.Scene.save_obj

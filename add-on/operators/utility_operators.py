@@ -288,62 +288,10 @@ class CreatePointCloudObjectOperator(bpy.types.Operator):
         print("--- %s seconds ---" % (time.time() - start_time))
         return {'FINISHED'}
 
-#Operator for the pop-up dialog
-class PopUpOperator(bpy.types.Operator):
-    bl_idname = "wm.correction_pop_up"
-    bl_label = "Confirm correction pop up"
-    bl_description = "Pop up to confirm"
-    
-    average_intensity: bpy.props.FloatProperty()
-    adjust_action: bpy.props.StringProperty()
-    
-    action: bpy.props.EnumProperty(
-        items=[
-            ('CONTINUE', "Yes", "Yes"),
-            ('STOP', "No", "No"),
-        ],
-        default='CONTINUE',
-    )
-    #Define the custom draw method
-    def draw(self, context):
-        layout = self.layout
-        col = layout.column()
-        
-        #Add custom buttons to the UI
-        if self.adjust_action=='LOWER':
-            col.label(text="No road marks found. Try with lower threshold?")
-        elif self.adjust_action=='HIGHER':
-            col.label(text="Threshold might be too low, Try with higher threshold?")
-        col.label(text="Choose an action:")
-        col.separator()
-        
-        #Use 'props_enum' to create buttons for each enum property
-        layout.props_enum(self, "action")
-        
-    def execute(self, context):
-
-        #Based on the user's choice, perform the action
-        context.scene.user_input_result = self.action
-       
-        if self.action == 'CONTINUE':
-           if self.adjust_action=='LOWER':
-               old_threshold=context.scene.intensity_threshold
-               context.scene.intensity_threshold=self.average_intensity-20 #lower the threshold to the average intensity around the mouseclick
-               print("changed intensity threshold from: ",old_threshold,"to: ",self.average_intensity," please try again")
-           elif self.adjust_action=='HIGHER':
-               old_threshold=context.scene.intensity_threshold
-               context.scene.intensity_threshold=self.average_intensity-30 #higher the threshold to the average intensity around the mouseclick 
-               print("changed intensity threshold from: ",old_threshold,"to: ",self.average_intensity," please try again")
-        elif self.action == 'STOP':
-            return {'CANCELLED'}
-        
-        return {'FINISHED'}
-
-    def invoke(self, context, event):
-        wm = context.window_manager
-        return wm.invoke_props_dialog(self)
 
     
 #module imports
-from ..utils.blender_utils import GetPointCloudData, is_mouse_in_3d_view, redraw_viewport, export_as_shapefile, is_click_on_white,set_view_to_top, prepare_object_for_export
+from ..utils.blender_utils import  is_mouse_in_3d_view, redraw_viewport,set_view_to_top, prepare_object_for_export
 from ..utils.math_utils import get_average_intensity
+from ..utils.pointcloud_utils import GetPointCloudData, export_as_shapefile
+from ..utils.digitizing_utils import is_click_on_white

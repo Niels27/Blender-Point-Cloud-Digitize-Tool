@@ -19,7 +19,7 @@ Installing Libraries: full script.py has functions to install multiple libraries
 Manual import takes 1-3 minutes first time, but ~70% faster subsequent times. 
 
 Launching web viewer: launch a terminal in /webbased poc/  then enter: python app.py
-Open http://127.0.0.1:5000/ in browser. 
+Open http://127.0.0.1:5000/ in browser. Needs GPU acceleration enabled or else it lags.
 
 
 FUNCTIONS

@@ -236,59 +236,92 @@ def create_fixed_length_segments(points, segment_length=1.0):
 
     return extended_points, total_distance, segment_count + 1  # Include the last partial segment
 
-#Function to create different shapes out of points
-def create_shape(coords_list, shape_type,vertices=None,filter_coords=True):
-    
-    start_time = time.time()
-    marking_color = bpy.context.scene.marking_color 
-    transparency = bpy.context.scene.marking_transparency
-    line_width = bpy.context.scene.fatline_width
-    shape_coords = None  #Default to original coordinates
-    if filter_coords:
-        coords_list=filter_noise_with_dbscan(coords_list,eps=bpy.context.scene.filter_distance, min_samples=bpy.context.scene.filter_neighbors)
-    
-    if shape_type == "triangle":
-        #flexible_coords = create_flexible_triangle(coords_list)
-        vertices=create_fixed_triangle(vertices)
-        obj=create_mesh_with_material(
-            "Triangle Shape", vertices,
-            marking_color, transparency)
-        create_triangle_outline(vertices)
+#Class defining the factory design pattern for creating different shapes
+class ShapeFactory:
+    def __init__(self):
+        self.marking_color = bpy.context.scene.marking_color
+        self.transparency = bpy.context.scene.marking_transparency
+        self.line_width = bpy.context.scene.line_width
+        self.eps=bpy.context.scene.filter_distance
+        self.min_samples=bpy.context.scene.filter_neighbors
         
-    elif shape_type == "flexible triangle":
-        vertices = create_flexible_triangle(coords_list)
-        obj=create_mesh_with_material(
-            "flexible triangle", vertices,
-            marking_color, transparency)
-        create_triangle_outline(vertices)
-        print("Drawing flexible triangle")
-             
-    elif shape_type == "rectangle":
-        print("Drawing rectangle")
-        shape_coords = create_flexible_rectangle(coords_list)
-        #shape_coords=create_fixed_rectangle_old(shape_coords)
-        obj=create_mesh_with_material(
-            "rectangle Shape", shape_coords,
-            marking_color, transparency)
-        
-    elif shape_type == "curved line":
-        print("Drawing curved line")
-        middle_points = create_middle_points(coords_list)
+    def create_shape(self, coords_list, vertices=None, filter_coords=True):
+        raise NotImplementedError("This method should be overridden in subclasses")
+    def filter_coords(self, coords_list):
+        return filter_noise_with_dbscan(coords_list,self.eps,self.min_samples)
+    def finalize_shape(self, obj):
+        prepare_object_for_export(obj)  
 
+class TriangleShapeFactory(ShapeFactory):
+    def create_shape(self, coords_list, vertices=None, filter_coords=True):
+        if(filter_coords):
+            coords_list = self.filter_coords(coords_list)
+        vertices=create_fixed_triangle(vertices)
+        obj=create_mesh_with_material("Triangle Shape", vertices,self.marking_color, self.transparency)
+        create_triangle_outline(vertices)
+        self.finalize_shape(obj)
+        
+class FlexibleTriangleShapeFactory(ShapeFactory):
+    def create_shape(self,coords_list, vertices=None, filter_coords=True):
+        if(filter_coords):
+            coords_list = self.filter_coords(coords_list)
+        vertices = create_flexible_triangle(coords_list)
+        obj=create_mesh_with_material("flexible triangle", vertices, self.marking_color, self.transparency)
+        create_triangle_outline(vertices)
+        self.finalize_shape(obj)
+        print("Drawing flexible triangle")
+
+class RectangleShapeFactory(ShapeFactory):
+    def create_shape(self,coords_list,vertices=None, filter_coords=True):
+        if(filter_coords):
+            coords_list = self.filter_coords(coords_list)        
+        print("Drawing rectangle")
+        print("points amount", len(coords_list))
+        shape_coords = create_flexible_rectangle(coords_list)
+        obj=create_mesh_with_material("rectangle Shape", shape_coords,self.marking_color, self.transparency)
+        self.finalize_shape(obj)
+        
+class CurvedLineShapeFactory(ShapeFactory):
+    def create_shape(self,coords_list,vertices=None, filter_coords=True):
+        if(filter_coords):
+            coords_list = self.filter_coords(coords_list)        
+        print("Drawing curved line")
+        print("points amount", len(coords_list))
+        middle_points = create_middle_points(coords_list)
         fixed_length_points, total_length, segments = create_fixed_length_segments(middle_points)
         print(f"Total line length: {total_length:.2f} meters")
         print(f"Segmented lines drawn: {segments}")
-
-        obj=create_polyline(middle_points,  width=line_width, color=(marking_color[0], marking_color[1], marking_color[2], transparency))
-   
-    else:
-        print("Drawing unkown Shape")
-        obj=create_mesh_with_material(
-            "Unkown Shape", coords_list,
-            marking_color, transparency)
+        obj=create_polyline(middle_points,  width=self.line_width, color=(self.marking_color[0], self.marking_color[1], self.marking_color[2], self.transparency))
+        self.finalize_shape(obj)
         
-    print(f"Rendered {shape_type} shape in: {time.time() - start_time:.2f} seconds")
-    prepare_object_for_export(obj)
+class UnknownShapeFactory(ShapeFactory):
+    def create_shape(self,coords_list,vertices=None,filter_coords=True):
+        if(filter_coords):
+            coords_list = self.filter_coords(coords_list)        
+        print("Drawing unkown Shape")
+        obj=create_mesh_with_material("Unkown Shape", coords_list,self.marking_color, self.transparency)
+        self.finalize_shape(obj)
+        
+def create_shape(coords_list, shape_type, vertices=None, filter_coords=True):
+
+    factory = None
+  
+    if shape_type == "triangle":
+        factory = TriangleShapeFactory()
+    elif shape_type == "flexible triangle":
+        factory = FlexibleTriangleShapeFactory()
+    elif shape_type == "rectangle":
+        factory = RectangleShapeFactory()
+    elif shape_type == "curved line":
+        factory = CurvedLineShapeFactory()
+    elif shape_type == "unknown":
+        factory = UnknownShapeFactory()
+        
+    if factory:
+         return factory.create_shape(coords_list, vertices, filter_coords)
+    else:
+        print(f"Shape type '{shape_type}' is not recognized.")
+        
     
 #Function to create a mesh object
 def create_mesh_with_material(obj_name, shape_coords, marking_color, transparency):
@@ -392,7 +425,7 @@ def create_rectangle_line_object(start, end):
     marking_color = context.scene.marking_color
     transparency = context.scene.marking_transparency
     extra_z_height = context.scene.extra_z_height
-    width = context.scene.fatline_width
+    width = context.scene.line_width
     #Calculate the direction vector and its length
     direction = end - start
 
@@ -468,7 +501,7 @@ def create_dots_shape(coords_list,name="Dots Shape", filter_points=True):
 
     bm = bmesh.new()
 
-    square_size = 0.025  #Size of each square
+    square_size = 0.05  #Size of each square
     z_offset = extra_z_height  #Offset in Z coordinate
     max_gap = 10  #Maximum gap size to fill
 
@@ -618,7 +651,32 @@ def snap_line_to_road_mark(self, context, first_click_point, last_click_point,po
     print("Snapped to road mark")
     return new_first_click_point, new_last_click_point
 
+# Function to check if a mouseclick is on a white object
+def is_click_on_white(self, context, location, neighbors=6):
+    pointcloud_data = GetPointCloudData()
+    point_colors = pointcloud_data.point_colors
+    points_kdtree = pointcloud_data.points_kdtree
+    intensity_threshold = context.scene.intensity_threshold
+
+    # Define the number of nearest neighbors to search for
+    num_neighbors = neighbors
+
+    # Use the k-d tree to find the nearest points to the click location
+    _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
+
+    average_intensity = get_average_intensity(nearest_indices, point_colors)
+
+    print(average_intensity)
+
+    # If the average intensity is above the threshold, return True (click is on a "white" object)
+    if average_intensity > intensity_threshold:
+        return True
+    else:
+        print("Intensity threshold not met")
+        return False
 
 #module imports
-from ..utils.blender_utils import is_click_on_white, prepare_object_for_export
-from ..utils.math_utils import create_middle_points, filter_noise_with_dbscan, move_triangle_to_line, region_growing
+from ..utils.blender_utils import prepare_object_for_export
+from ..utils.math_utils import create_middle_points, filter_noise_with_dbscan, region_growing, get_average_intensity
+from ..utils.pointcloud_utils import GetPointCloudData
+

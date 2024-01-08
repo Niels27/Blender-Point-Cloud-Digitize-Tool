@@ -2,7 +2,7 @@
 import bpy
 
 #Panel for the Road Marking Digitizer
-class DIGITIZE_PT_Panel(bpy.types.Panel):
+class AddOnPanel(bpy.types.Panel):
     bl_label = "Road Marking Digitizer"
     bl_idname = "DIGITIZE_PT_Panel"
     bl_space_type = 'VIEW_3D'
@@ -65,7 +65,7 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
         row.operator("custom.auto_curved_line", text="Auto line marker") 
         row = layout.row()
         row.prop(scene, "snap_to_road_mark")
-        row.prop(scene, "fatline_width")
+        row.prop(scene, "line_width")
        
         layout.operator("custom.dashed_line_marking_operator", text="Dash line marker") 
         layout.operator("custom.curb_detection_operator", text="Curb marker") 
@@ -103,3 +103,58 @@ class DIGITIZE_PT_Panel(bpy.types.Panel):
          #Dummy space
         for _ in range(10): 
             layout.label(text="")   
+
+#Operator for the pop-up dialog
+class PopUpOperator(bpy.types.Operator):
+    bl_idname = "wm.correction_pop_up"
+    bl_label = "Confirm correction pop up"
+    bl_description = "Pop up to confirm"
+    
+    average_intensity: bpy.props.FloatProperty()
+    adjust_action: bpy.props.StringProperty()
+    
+    action: bpy.props.EnumProperty(
+        items=[
+            ('CONTINUE', "Yes", "Yes"),
+            ('STOP', "No", "No"),
+        ],
+        default='CONTINUE',
+    )
+    #Define the custom draw method
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column()
+        
+        #Add custom buttons to the UI
+        if self.adjust_action=='LOWER':
+            col.label(text="No road marks found. Try with lower threshold?")
+        elif self.adjust_action=='HIGHER':
+            col.label(text="Threshold might be too low, Try with higher threshold?")
+        col.label(text="Choose an action:")
+        col.separator()
+        
+        #Use 'props_enum' to create buttons for each enum property
+        layout.props_enum(self, "action")
+        
+    def execute(self, context):
+
+        #Based on the user's choice, perform the action
+        context.scene.user_input_result = self.action
+       
+        if self.action == 'CONTINUE':
+           if self.adjust_action=='LOWER':
+               old_threshold=context.scene.intensity_threshold
+               context.scene.intensity_threshold=self.average_intensity-20 #lower the threshold to the average intensity around the mouseclick
+               print("changed intensity threshold from: ",old_threshold,"to: ",self.average_intensity," please try again")
+           elif self.adjust_action=='HIGHER':
+               old_threshold=context.scene.intensity_threshold
+               context.scene.intensity_threshold=self.average_intensity-30 #higher the threshold to the average intensity around the mouseclick 
+               print("changed intensity threshold from: ",old_threshold,"to: ",self.average_intensity," please try again")
+        elif self.action == 'STOP':
+            return {'CANCELLED'}
+        
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self)
