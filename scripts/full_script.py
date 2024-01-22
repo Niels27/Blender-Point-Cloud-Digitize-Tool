@@ -76,8 +76,49 @@ shape_counter=1 #Keeps track of amount of shapes drawn, used to number them
 auto_las_file_path =os.path.dirname(bpy.data.filepath)+'/auto.laz' #path  for a laz file name auto.laz
 save_json=False #generate a json file of point cloud data
 last_processed_index = 0 #Global variable to keep track of the last processed index, for numbering road marks
+is_operator_running=False #Global variable to check if an operator is running
 
 
+
+#Operator template
+class BaseOperator(bpy.types.Operator):
+    bl_idname = "custom.base_operator"
+    bl_label = "Base Operator"
+    bl_description = "Base Operator"
+    
+    def __init__(self):
+        pass
+
+    def invoke(self, context, event):
+        return self.execute(context)
+
+    def execute(self, context):
+        return {'FINISHED'}
+
+    def modal(self, context, event):
+        return {'RUNNING_MODAL'}
+
+    def cancel(self, context):
+        return {'CANCELLED'}
+    
+class OperatorManager:
+    active_operator = None
+
+    @staticmethod
+    def set_active(operator):
+        if OperatorManager.active_operator:
+            print(f"Deactivating operator: {OperatorManager.active_operator.bl_idname}")
+            OperatorManager.active_operator.deactivate()
+        print(f"Activating operator: {operator.bl_idname}")
+        OperatorManager.active_operator = operator
+
+    @staticmethod
+    def deactivate_active():
+        if OperatorManager.active_operator:
+            current_operator = OperatorManager.active_operator
+            print(f"Deactivating operator: {current_operator.bl_idname}")
+            OperatorManager.active_operator = None
+            current_operator.deactivate()
 
 
 #Utility operators
@@ -347,61 +388,6 @@ class CreatePointCloudObjectOperator(bpy.types.Operator):
         print("--- %s seconds ---" % (time.time() - start_time))
         return {'FINISHED'}
 
-#Operator for the pop-up dialog
-class PopUpOperator(bpy.types.Operator):
-    bl_idname = "wm.correction_pop_up"
-    bl_label = "Confirm correction pop up"
-    bl_description = "Pop up to confirm"
-    
-    average_intensity: bpy.props.FloatProperty()
-    adjust_action: bpy.props.StringProperty()
-    
-    action: bpy.props.EnumProperty(
-        items=[
-            ('CONTINUE', "Yes", "Yes"),
-            ('STOP', "No", "No"),
-        ],
-        default='CONTINUE',
-    )
-    #Define the custom draw method
-    def draw(self, context):
-        layout = self.layout
-        col = layout.column()
-        
-        #Add custom buttons to the UI
-        if self.adjust_action=='LOWER':
-            col.label(text="No road marks found. Try with lower threshold?")
-        elif self.adjust_action=='HIGHER':
-            col.label(text="Threshold might be too low, Try with higher threshold?")
-        col.label(text="Choose an action:")
-        col.separator()
-        
-        #Use 'props_enum' to create buttons for each enum property
-        layout.props_enum(self, "action")
-        
-    def execute(self, context):
-
-        #Based on the user's choice, perform the action
-        context.scene.user_input_result = self.action
-       
-        if self.action == 'CONTINUE':
-           if self.adjust_action=='LOWER':
-               old_threshold=context.scene.intensity_threshold
-               context.scene.intensity_threshold=self.average_intensity-20 #lower the threshold to the average intensity around the mouseclick
-               print("changed intensity threshold from: ",old_threshold,"to: ",self.average_intensity," please try again")
-           elif self.adjust_action=='HIGHER':
-               old_threshold=context.scene.intensity_threshold
-               context.scene.intensity_threshold=self.average_intensity-30 #higher the threshold to the average intensity around the mouseclick 
-               print("changed intensity threshold from: ",old_threshold,"to: ",self.average_intensity," please try again")
-        elif self.action == 'STOP':
-            return {'CANCELLED'}
-        
-        return {'FINISHED'}
-
-    def invoke(self, context, event):
-        wm = context.window_manager
-        return wm.invoke_props_dialog(self)
-
 
 
 
@@ -490,13 +476,15 @@ class DrawStraightFatLineOperator(bpy.types.Operator):
     
 #Operator to draw simple shapes in the viewport using mouseclicks   
 class SimpleMarkOperator(bpy.types.Operator):
+
+        
     bl_idname = "custom.mark_fast"
     bl_label = "Mark Road Markings fast"
     bl_description= "Mark shapes with simple shapes"
     _is_running = False  #Class variable to check if the operator is already running
     
     def modal(self, context, event):
-    
+        global is_operator_running
         set_view_to_top(context)
         pointcloud_data = GetPointCloudData()
         point_coords = pointcloud_data.point_coords
@@ -552,10 +540,8 @@ class SimpleMarkOperator(bpy.types.Operator):
                 #Create a single mesh for the combined  rectangles
                 create_shape(region_growth_coords, shape_type="unknown")
                 
-        elif event.type == 'ESC':
-            SimpleMarkOperator._is_running = False
-            print("Operation was cancelled")
-            return {'CANCELLED'}  #Stop when ESCAPE is pressed
+        elif event.type == 'ESC' or not is_operator_running:
+            return self.cancel(context)  
 
         return {'PASS_THROUGH'}
 
@@ -564,20 +550,36 @@ class SimpleMarkOperator(bpy.types.Operator):
             self.report({'WARNING'}, "Operator is already running")
             return {'CANCELLED'}  #Do not run the operator if it's already running
 
+        global is_operator_running
+        if is_operator_running:
+            self.report({'WARNING'}, "Another operator is already running")
+            return {'CANCELLED'}
+        is_operator_running = True
+        
         if context.area.type == 'VIEW_3D':
+            
             SimpleMarkOperator._is_running = True  #Set the flag to indicate the operator is running
             context.window_manager.modal_handler_add(self)
+            #OperatorManager.set_active(self)
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
-
+        
+    def deactivate(self):
+        self.cancel(bpy.context)
+        
     def cancel(self, context):
+        global is_operator_running
+        is_operator_running = False
         SimpleMarkOperator._is_running = False  #Reset the flag when the operator is cancelled
+        #OperatorManager.deactivate_active()
         print("Operator was properly cancelled")  #Debug message
         return {'CANCELLED'}
         
 #Operator to draw complex shapes on mouseclicks using tiny squares, which then get combined into a single mesh         
 class ComplexMarkOperator(bpy.types.Operator):
+
+        
     bl_idname = "custom.mark_complex"
     bl_label = "Mark complex Road Markings"
     bl_description= "Mark shapes using multiple points"
@@ -590,7 +592,7 @@ class ComplexMarkOperator(bpy.types.Operator):
     _is_running = False  #Class variable to check if the operator is already running
     
     def modal(self, context, event):
-        
+        global is_operator_running
         set_view_to_top(context)
         pointcloud_data = GetPointCloudData()
         point_coords = pointcloud_data.point_coords
@@ -612,7 +614,7 @@ class ComplexMarkOperator(bpy.types.Operator):
             self.process_location( context, location, intensity_threshold,points_kdtree,point_coords,point_colors,show_popup)
                 
         #If escape is pressed, stop the operator 
-        elif event.type == 'ESC':
+        elif event.type == 'ESC' or not is_operator_running:
             return self.cancel(context)  
 
         return {'PASS_THROUGH'}
@@ -655,19 +657,31 @@ class ComplexMarkOperator(bpy.types.Operator):
             create_dots_shape(region_growth_coords)
         
     def invoke(self, context, event):
+       
         if ComplexMarkOperator._is_running:
             self.report({'WARNING'}, "Operator is already running")
             return {'CANCELLED'}  #Do not run the operator if it's already running
-
+        global is_operator_running
+        if is_operator_running:
+            self.report({'WARNING'}, "Another operator is already running")
+            return {'CANCELLED'}
+        is_operator_running = True
         if context.area.type == 'VIEW_3D':
             ComplexMarkOperator._is_running = True  #Set the flag to indicate the operator is running
+            #OperatorManager.set_active(self)
             context.window_manager.modal_handler_add(self)
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}
-
+    
+    def deactivate(self):
+        self.cancel(bpy.context)
+        
     def cancel(self, context):
+        global is_operator_running
+        is_operator_running = False
         ComplexMarkOperator._is_running = False  #Reset the flag when the operator is cancelled
+        #OperatorManager.deactivate_active()
         print("Operator was properly cancelled")  #Debug message
         return {'CANCELLED'}
     
@@ -688,7 +702,7 @@ class ComplexMarkOperator(bpy.types.Operator):
         return {'FINISHED'}
        
 #Operator to scans the entire point cloud for road markings, then mark them   
-class FindALlRoadMarkingsOperator(bpy.types.Operator):
+class FindAllRoadMarkingsOperator(bpy.types.Operator):
     bl_idname = "custom.find_all_road_marks"
     bl_label = "Finds all road marks"
     bl_description="Finds all road marks up to a max and marks them"
@@ -1063,8 +1077,7 @@ class SelectionDetectionOpterator(bpy.types.Operator):
         print("Operator was properly cancelled")  #Debug message
         return {'CANCELLED'}
 
-
-
+#Operator to detect triangles between 2 mouseclicks and then draw a line between them
 class AutoTriangleMarkOperator(bpy.types.Operator):
     bl_idname = "custom.auto_mark_triangle"
     bl_label = "Auto Mark Triangle"
@@ -1226,8 +1239,6 @@ class AutoTriangleMarkOperator(bpy.types.Operator):
             return {'RUNNING_MODAL'}
         else:
             return {'CANCELLED'}   
-
-
 
 #Operator to mark triangles at every mouse click
 class TriangleMarkOperator(bpy.types.Operator):
@@ -1976,13 +1987,11 @@ class FixedRectangleMarkOperator(bpy.types.Operator):
             return {'CANCELLED'}  
 
 
-
-
-#Blender utility functions
-#Singleton class to save point cloud data
+# Point cloud utility functions
+# Singleton class to save point cloud data
 class GetPointCloudData:
     _instance = None
-    
+
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(GetPointCloudData, cls).__new__(cls)
@@ -1990,17 +1999,16 @@ class GetPointCloudData:
             cls._instance.point_colors = None
             cls._instance.points_kdtree = None
             cls._instance.original_coords = None
-            
+
         return cls._instance
-    
-    #Function to load the point cloud, store it's data and draw it using openGL, optimized version
-    def pointcloud_load_optimized(self,path, point_size, sparsity_value,z_height_cut_off):
-        
+
+    # Function to load the point cloud, store it's data and draw it using openGL, optimized version
+    def pointcloud_load_optimized(self, path, point_size, sparsity_value, z_height_cut_off):
         start_time = time.time()
         print("Started loading point cloud.."),
-        global use_pickled_kdtree,point_cloud_name,point_cloud_point_size, save_json
-        overwrite_data= bpy.context.scene.overwrite_existing_data
-        
+        global use_pickled_kdtree, point_cloud_name, point_cloud_point_size, save_json
+        overwrite_data = bpy.context.scene.overwrite_existing_data
+
         base_file_name = os.path.basename(path)
         point_cloud_name = base_file_name
         directory_path = os.path.dirname(path)
@@ -2008,7 +2016,7 @@ class GetPointCloudData:
         if blend_file_path:
             directory = os.path.dirname(blend_file_path)
         else:
-        #Prompt the user to save the file first 
+            # Prompt the user to save the file first
             print("please save blender project first!")
             return
         directory = os.path.dirname(blend_file_path)
@@ -2020,183 +2028,340 @@ class GetPointCloudData:
         file_name_avg_coords = base_file_name + "_avgCoords.npy"
         file_name_kdtree = base_file_name + "_kdtree.joblib"
         file_name_kdtree_pickle = base_file_name + "_kdtree.gz"
-    
+
         if not os.path.exists(stored_data_path):
             os.mkdir(stored_data_path)
-        
-        if not os.path.exists(os.path.join(stored_data_path, file_name_points)) or overwrite_data:
-            
-            point_cloud = lp.read(path) 
-            ground_code = 2 #the ground is usually 2
+
+        if (
+            not os.path.exists(os.path.join(stored_data_path, file_name_points))
+            or overwrite_data
+        ):
+            point_cloud = lp.read(path)
+            ground_code = 2  # the ground is usually 2
 
             print(f"Using classification code for GROUND: {ground_code}")
-            use_ground_points_only=bpy.context.scene.ground_only
+            use_ground_points_only = bpy.context.scene.ground_only
             if use_ground_points_only:
-                #Filter points based on classification
+                # Filter points based on classification
                 ground_points_mask = point_cloud.classification == ground_code
                 if ground_points_mask.any():
-                    #Applying the ground points mask
-                    points_a = np.vstack((point_cloud.x[ground_points_mask], 
-                                        point_cloud.y[ground_points_mask], 
-                                        point_cloud.z[ground_points_mask])).transpose()
-                    colors_a = np.vstack((point_cloud.red[ground_points_mask], 
-                                        point_cloud.green[ground_points_mask], 
-                                        point_cloud.blue[ground_points_mask])).transpose() / 65535
+                    # Applying the ground points mask
+                    points_a = np.vstack(
+                        (
+                            point_cloud.x[ground_points_mask],
+                            point_cloud.y[ground_points_mask],
+                            point_cloud.z[ground_points_mask],
+                        )
+                    ).transpose()
+                    colors_a = (
+                        np.vstack(
+                            (
+                                point_cloud.red[ground_points_mask],
+                                point_cloud.green[ground_points_mask],
+                                point_cloud.blue[ground_points_mask],
+                            )
+                        ).transpose()
+                        / 65535
+                    )
                 else:
                     print("classification ", ground_code, " not found")
-            else: 
-                points_a = np.vstack((point_cloud.x, point_cloud.y, point_cloud.z)).transpose()
-                colors_a = np.vstack((point_cloud.red, point_cloud.green, point_cloud.blue)).transpose() / 65535
-                
-            #Convert points to float32
+            else:
+                points_a = np.vstack(
+                    (point_cloud.x, point_cloud.y, point_cloud.z)
+                ).transpose()
+                colors_a = (
+                    np.vstack(
+                        (point_cloud.red, point_cloud.green, point_cloud.blue)
+                    ).transpose()
+                    / 65535
+                )
+
+            # Convert points to float32
             points_a = points_a.astype(np.float32)
-            #Convert colors to uint8
+            # Convert colors to uint8
             colors_a = (colors_a * 255).astype(np.uint8)
-            
-            #Sort the points based on the Z coordinate
+
+            # Sort the points based on the Z coordinate
             sorted_points = points_a[points_a[:, 2].argsort()]
 
-            #Determine the cutoff index for the lowest %
+            # Determine the cutoff index for the lowest %
             cutoff_index = int(len(sorted_points) * 0.1)
 
-            #Calculate the average Z value of the lowest % of points
+            # Calculate the average Z value of the lowest % of points
             road_base_level = np.mean(sorted_points[:cutoff_index, 2])
 
             print("Estimated road base level:", road_base_level)
-            
-            #Store the original coordinates 
+
+            # Store the original coordinates
             self.original_coords = np.copy(points_a)
-            
-            if(z_height_cut_off>0):
-                #Filter points with Z coordinate > 0.5
+
+            if z_height_cut_off > 0:
+                # Filter points with Z coordinate > 0.5
                 print("Number of points before filtering:", len(points_a))
-                mask = points_a[:, 2] <= (road_base_level+z_height_cut_off)
+                mask = points_a[:, 2] <= (road_base_level + z_height_cut_off)
                 points_a = points_a[mask]
                 colors_a = colors_a[mask]
                 print("Number of points after filtering:", len(points_a))
-                
-            #Shifting coords
+
+            # Shifting coords
             points_a_avg = np.mean(points_a, axis=0)
             points_a = points_a - points_a_avg
-       
-            #Storing Shifting coords 
+
+            # Storing Shifting coords
             np.save(os.path.join(stored_data_path, file_name_avg_coords), points_a_avg)
-        
-            #Storing the centered coordinate arrays as npy file
+
+            # Storing the centered coordinate arrays as npy file
             np.save(os.path.join(stored_data_path, file_name_points), points_a)
             np.save(os.path.join(stored_data_path, file_name_colors), colors_a)
-                    
+
         else:
             points_a = np.load(os.path.join(stored_data_path, file_name_points))
             colors_a = np.load(os.path.join(stored_data_path, file_name_colors))
-            self.original_coords = np.load(os.path.join(stored_data_path, file_name_avg_coords))
-            
-        #Store point data and colors globally
+            self.original_coords = np.load(
+                os.path.join(stored_data_path, file_name_avg_coords)
+            )
+
+        # Store point data and colors globally
         self.point_coords = points_a
         self.point_colors = colors_a
         point_cloud_point_size = point_size
-        
+
         print("point cloud loaded in: ", time.time() - start_time)
-        
+
         step = int(1 / sparsity_value)
 
-        #Evenly sample points using the provided sparsity value
+        # Evenly sample points using the provided sparsity value
         reduced_points = points_a[::step]
         reduced_colors = colors_a[::step]
-            
-        #Save json file of point cloud data
+
+        # Save json file of point cloud data
         if save_json:
-            export_as_json(reduced_points,reduced_colors,JSON_data_path,point_cloud_name)
-  
-        #Function to save KD-tree with pickle and gzip
+            export_as_json(
+                reduced_points, reduced_colors, JSON_data_path, point_cloud_name
+            )
+
+        # Function to save KD-tree with pickle and gzip
         def save_kdtree_pickle_gzip(file_path, kdtree):
-            with gzip.open(file_path, 'wb', compresslevel=1) as f:  #compresslevel from 1-9, low-high compression
+            with gzip.open(
+                file_path, "wb", compresslevel=1
+            ) as f:  # compresslevel from 1-9, low-high compression
                 pickle.dump(kdtree, f)
-        #Function to load KD-tree with pickle and gzip
+
+        # Function to load KD-tree with pickle and gzip
         def load_kdtree_pickle_gzip(file_path):
-            with gzip.open(file_path, 'rb') as f:
-                return pickle.load(f)  
-            
-        use_pickled_kdtree=True
+            with gzip.open(file_path, "rb") as f:
+                return pickle.load(f)
+
+        use_pickled_kdtree = True
         if use_pickled_kdtree:
-            #KDTree handling
+            # KDTree handling
             kdtree_pickle_path = os.path.join(stored_data_path, file_name_kdtree_pickle)
             if not os.path.exists(kdtree_pickle_path) or overwrite_data:
-                #Create the kdtree if it doesn't exist
+                # Create the kdtree if it doesn't exist
                 print("creating cKDTree..")
                 start_time = time.time()
                 self.points_kdtree = cKDTree(np.array(self.point_coords))
                 save_kdtree_pickle_gzip(kdtree_pickle_path, self.points_kdtree)
-                print("Compressed cKD-tree created at:", kdtree_pickle_path," in:",time)
+                print(
+                    "Compressed cKD-tree created at:", kdtree_pickle_path, " in:", time
+                )
             else:
-                print("kdtree found at: ",kdtree_pickle_path, "loading..")
+                print("kdtree found at: ", kdtree_pickle_path, "loading..")
                 self.points_kdtree = load_kdtree_pickle_gzip(kdtree_pickle_path)
-                print("Compressed cKD-tree loaded from gzip file in:", time.time() - start_time)
-        else:  
-            #KDTree handling
+                print(
+                    "Compressed cKD-tree loaded from gzip file in:",
+                    time.time() - start_time,
+                )
+        else:
+            # KDTree handling
             kdtree_path = os.path.join(stored_data_path, file_name_kdtree)
             self.points_kdtree = load_kdtree_from_file(kdtree_path)
-            if not os.path.exists(kdtree_pickle_path) or bpy.types.Scene.overwrite_existing_data == False:
-                #create the kdtree if it doesn't exist
+            if (
+                not os.path.exists(kdtree_pickle_path)
+                or bpy.types.Scene.overwrite_existing_data == False
+            ):
+                # create the kdtree if it doesn't exist
                 self.points_kdtree = cKDTree(np.array(self.point_coords))
                 print("kdtree created in: ", time.time() - start_time)
-                #Save the kdtree to a file
+                # Save the kdtree to a file
                 save_kdtree_to_file(kdtree_path, self.points_kdtree)
                 print("kdtree saved in: ", time.time() - start_time, "at", kdtree_path)
-            
-        try: 
+
+        try:
             redraw_viewport()
-            draw_handler = bpy.app.driver_namespace.get('my_draw_handler')
-            
+            draw_handler = bpy.app.driver_namespace.get("my_draw_handler")
+
             if draw_handler is None:
-                #colors_ar should be in uint8 format
-                reduced_colors = reduced_colors / 255.0  #Normalize to 0-1 range
-                #Converting to tuple 
+                # colors_ar should be in uint8 format
+                reduced_colors = reduced_colors / 255.0  # Normalize to 0-1 range
+                # Converting to tuple
                 coords = tuple(map(tuple, reduced_points))
                 colors = tuple(map(tuple, reduced_colors))
-                
-                shader = gpu.shader.from_builtin('3D_FLAT_COLOR')
+
+                shader = gpu.shader.from_builtin("3D_FLAT_COLOR")
                 batch = batch_for_shader(
-                    shader, 'POINTS',
-                    {"pos": coords, "color": colors}
+                    shader, "POINTS", {"pos": coords, "color": colors}
                 )
-                
-                #the draw function
+
+                # the draw function
                 def draw():
                     gpu.state.point_size_set(point_size)
                     bgl.glEnable(bgl.GL_DEPTH_TEST)
                     batch.draw(shader)
                     bgl.glDisable(bgl.GL_DEPTH_TEST)
-                    
-                #Define draw handler to acces the drawn point cloud later on
-                draw_handler = bpy.types.SpaceView3D.draw_handler_add(draw, (), 'WINDOW', 'POST_VIEW')
-                #Store the draw handler reference in the driver namespace
-                bpy.app.driver_namespace['my_draw_handler'] = draw_handler
-                
-                #Calculate the bounding box of the point cloud
+
+                # Define draw handler to acces the drawn point cloud later on
+                draw_handler = bpy.types.SpaceView3D.draw_handler_add(
+                    draw, (), "WINDOW", "POST_VIEW"
+                )
+                # Store the draw handler reference in the driver namespace
+                bpy.app.driver_namespace["my_draw_handler"] = draw_handler
+
+                # Calculate the bounding box of the point cloud
                 min_coords = np.min(self.point_coords, axis=0)
                 max_coords = np.max(self.point_coords, axis=0)
                 bbox_center = (min_coords + max_coords) / 2
-                
-                #Get the active 3D view
+
+                # Get the active 3D view
                 for area in bpy.context.screen.areas:
-                    if area.type == 'VIEW_3D':
+                    if area.type == "VIEW_3D":
                         break
-                        
-                #Set the view to look at the bounding box center from above at a certain height
+
+                # Set the view to look at the bounding box center from above at a certain height
                 view3d = area.spaces[0]
-                camera_height=50
-                view3d.region_3d.view_location = (bbox_center[0], bbox_center[1], camera_height)  #X, Y, z meters height
-                #view3d.region_3d.view_rotation = bpy.context.scene.camera.rotation_euler  #Maintaining the current rotation
-                view3d.region_3d.view_distance = camera_height  #Distance from the view point
-                print("openGL point cloud drawn in:",time.time() - start_time,"using ",sparsity_value*100," percent of points (",len(reduced_points),") points") 
-                
+                camera_height = 50
+                view3d.region_3d.view_location = (
+                    bbox_center[0],
+                    bbox_center[1],
+                    camera_height,
+                )  # X, Y, z meters height
+                # view3d.region_3d.view_rotation = bpy.context.scene.camera.rotation_euler  #Maintaining the current rotation
+                view3d.region_3d.view_distance = (
+                    camera_height  # Distance from the view point
+                )
+                print(
+                    "openGL point cloud drawn in:",
+                    time.time() - start_time,
+                    "using ",
+                    sparsity_value * 100,
+                    " percent of points (",
+                    len(reduced_points),
+                    ") points",
+                )
+
             else:
                 print("Draw handler already exists, skipping drawing")
         except Exception as e:
-            #Handle any other exceptions that might occur
-            print(f"An error occurred: {e}")     
-                                
+            # Handle any other exceptions that might occur
+            print(f"An error occurred: {e}")
+
+# Function to load KDTree from a file
+def load_kdtree_from_file(file_path):
+    if os.path.exists(file_path):
+        print("Existing kdtree found. Loading...")
+        start_time = time.time()
+        with open(file_path, "r") as file:
+            kdtree_data = json.load(file)
+        # Convert the loaded points back to a Numpy array
+        points = np.array(kdtree_data["points"])
+        print(
+            "Loaded kdtree in: %s seconds" % (time.time() - start_time),
+            "from: ",
+            file_path,
+        )
+        return cKDTree(points)
+    else:
+        return None
+
+# Function to save KDTree to a file
+def save_kdtree_to_file(file_path, kdtree):
+    kdtree_data = {"points": kdtree.data.tolist()}  # Convert Numpy array to Python list
+    with open(file_path, "w") as file:
+        json.dump(kdtree_data, file)
+
+        if bpy.context.object:
+            bpy.ops.object.select_all(action="DESELECT")
+            bpy.context.view_layer.objects.active = bpy.context.object
+            bpy.context.object.select_set(True)
+            bpy.ops.object.delete()
+    print("saved kdtree to", file_path)
+
+# Function to export the point cloud as a shapefile
+def export_as_shapefile(points, points_percentage=100, epsg_value=28992):
+    global point_cloud_name
+    start_time = time.time()
+    num_points = len(points)
+    num_points_to_keep = math.ceil(num_points * (points_percentage / 100))
+    step = math.ceil(num_points / num_points_to_keep)
+    points = points[::step]
+
+    print(
+        "exporting as shapefile using ",
+        points_percentage,
+        " percent of points: ",
+        "(",
+        len(points),
+        " points)",
+    )
+    point_geometries = [Point(x, y, z) for x, y, z in points]
+    crs = "EPSG:" + str(epsg_value)
+    gdf = gpd.GeoDataFrame(geometry=point_geometries, crs=crs)
+    print(
+        "exported as a shapefile in: ", time.time() - start_time, " Saving to file..."
+    )
+
+    # Get the directory of the current Blender file
+    blend_file_path = bpy.data.filepath
+    directory = os.path.dirname(blend_file_path)
+
+    # Create a folder 'road_mark_images' if it doesn't exist
+    shapefile_dir = os.path.join(directory, "shapefiles")
+    if not os.path.exists(shapefile_dir):
+        os.makedirs(shapefile_dir)
+    # Define the path for the output shapefile
+    output_shapefile_path = os.path.join(shapefile_dir, f"{point_cloud_name}_shapefile")
+    gdf.to_file(output_shapefile_path)
+    print("saved shapefile to: ", shapefile_dir, " in: ", time.time() - start_time)
+
+# Function to export point cloud as JSON
+def export_as_json(point_coords, point_colors, JSON_data_path, point_cloud_name):
+    start_time = time.time()
+    print("exporting point cloud data as JSON")
+    # Adjusting the structure to match the expected format
+    point_cloud_data = [
+        {
+            "x": round(float(point[0]), 2),
+            "y": round(float(point[1]), 2),
+            "z": round(float(point[2]), 2),
+            "color": {"r": int(color[0]), "g": int(color[1]), "b": int(color[2])},
+        }
+        for point, color in zip(point_coords, point_colors)
+    ]
+
+    # Save as compact JSON to reduce file size
+    json_data = json.dumps(point_cloud_data, separators=(",", ":")).encode("utf-8")
+
+    # Defines file paths
+    json_file_path = os.path.join(
+        JSON_data_path, f"{point_cloud_name}_points_colors.json.gz"
+    )
+
+    # Write to JSON file
+    print("Compressing JSON...")
+    with gzip.open(json_file_path, "wb") as f:
+        f.write(json_data)
+
+    print(
+        "Combined JSON file compressed and saved at: ",
+        JSON_data_path,
+        "in: ",
+        time.time() - start_time,
+        "seconds",
+    )
+
+
+
+#Blender utility functions                        
 #Function to Check whether the mouseclick happened in the viewport or elsewhere    
 def is_mouse_in_3d_view(context, event):
     
@@ -2239,35 +2404,6 @@ def get_click_point_in_3d(context, event):
         Vector((0, 0, 0))
     )
     return coord_3d
-
-#Function to load KDTree from a file
-def load_kdtree_from_file(file_path):
-    if os.path.exists(file_path):
-        print("Existing kdtree found. Loading...")
-        start_time = time.time()
-        with open(file_path, 'r') as file:
-            kdtree_data = json.load(file)
-        #Convert the loaded points back to a Numpy array
-        points = np.array(kdtree_data['points'])
-        print("Loaded kdtree in: %s seconds" % (time.time() - start_time),"from: ",file_path)
-        return cKDTree(points)
-    else:
-        return None
-
-#Function to save KDTree to a file
-def save_kdtree_to_file(file_path, kdtree):
-    kdtree_data = {
-        'points': kdtree.data.tolist()  #Convert Numpy array to Python list
-    }
-    with open(file_path, 'w') as file:
-        json.dump(kdtree_data, file)
-        
-        if bpy.context.object:
-            bpy.ops.object.select_all(action='DESELECT')
-            bpy.context.view_layer.objects.active = bpy.context.object
-            bpy.context.object.select_set(True)
-            bpy.ops.object.delete()
-    print("saved kdtree to",file_path)
 
 #Function to store obj state
 def prepare_object_for_export(obj):
@@ -2362,6 +2498,7 @@ def set_origin_to_geometry_center(obj, return_obj=True):
     if return_obj:
         return obj
 
+#Function to export mesh to object
 def export_mesh_to_obj(mesh, file_path, mtl_name):
     #Open the file for writing the OBJ file
     with open(file_path, 'w') as file:
@@ -2380,6 +2517,7 @@ def export_mesh_to_obj(mesh, file_path, mtl_name):
                 face_line += f" {vert + 1}"  # OBJ files are 1-indexed
             file.write(f"{face_line}\n")
 
+#Function to export material to mtl file
 def export_material_to_mtl(mtl_path, mtl_name):
     #Open the file for writing the MTL file
     with open(mtl_path, 'w') as file:
@@ -2393,6 +2531,7 @@ def export_material_to_mtl(mtl_path, mtl_name):
         file.write("d 1.0000\n")  # transparency
         file.write("illum 2\n")  # Illumination 
 
+#Function to export all objects from a collection
 def export_objects_from_collection(collection_name, export_directory):
     # Ensure the export directory exists
     os.makedirs(export_directory, exist_ok=True)
@@ -2420,7 +2559,6 @@ def export_objects_from_collection(collection_name, export_directory):
 
             #Export the material
             export_material_to_mtl(mtl_file_path, obj.name)
-
 
 #Function to force top view in the viewport
 def set_view_to_top(context):
@@ -2465,86 +2603,6 @@ def redraw_viewport():
                 
     print("viewport redrawn")
     
-#Function to check if a mouseclick is on a white object
-def is_click_on_white(self, context, location, neighbors=6):
-    pointcloud_data = GetPointCloudData()
-    point_colors = pointcloud_data.point_colors
-    points_kdtree=  pointcloud_data.points_kdtree
-    intensity_threshold = context.scene.intensity_threshold
-
-    #Define the number of nearest neighbors to search for
-    num_neighbors = neighbors
-    
-    #Use the k-d tree to find the nearest points to the click location
-    _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
-    
-    average_intensity=get_average_intensity(nearest_indices,point_colors)
-
-    print(average_intensity)
-
-    #If the average intensity is above the threshold, return True (click is on a "white" object)
-    if average_intensity > intensity_threshold:
-        return True
-    else:
-        print("Intensity threshold not met")
-        return False
-
-#Function to export the point cloud as a shapefile   
-def export_as_shapefile(points,points_percentage=100,epsg_value=28992):
-    
-    global point_cloud_name
-    start_time=time.time()
-    num_points=len(points)
-    num_points_to_keep = math.ceil(num_points * (points_percentage/100))
-    step = math.ceil(num_points / num_points_to_keep)
-    points = points[::step]
-    
-    print("exporting as shapefile using ",points_percentage," percent of points: ","(",len(points)," points)")
-    point_geometries = [Point(x, y, z) for x, y, z in points]
-    crs = 'EPSG:' + str(epsg_value)
-    gdf = gpd.GeoDataFrame(geometry=point_geometries, crs=crs)
-    print("exported as a shapefile in: ",time.time()-start_time," Saving to file...")
-    
-    #Get the directory of the current Blender file
-    blend_file_path = bpy.data.filepath
-    directory = os.path.dirname(blend_file_path)
-
-    #Create a folder 'road_mark_images' if it doesn't exist
-    shapefile_dir = os.path.join(directory, 'shapefiles')
-    if not os.path.exists(shapefile_dir):
-        os.makedirs(shapefile_dir)
-    #Define the path for the output shapefile
-    output_shapefile_path = os.path.join(shapefile_dir, f"{point_cloud_name}_shapefile")
-    gdf.to_file(output_shapefile_path)
-    print("saved shapefile to: ",shapefile_dir," in: ",time.time()-start_time)
-
-#Function to export point cloud as JSON    
-def export_as_json(point_coords,point_colors,JSON_data_path,point_cloud_name):
-    start_time = time.time()
-    print("exporting point cloud data as JSON")
-    #Adjusting the structure to match the expected format
-    point_cloud_data = [
-        {
-            'x': round(float(point[0]), 2), 
-            'y': round(float(point[1]), 2), 
-            'z': round(float(point[2]), 2), 
-            'color': {'r': int(color[0]), 'g': int(color[1]), 'b': int(color[2])}
-        } for point, color in zip(point_coords, point_colors)
-    ]
-
-    #Save as compact JSON to reduce file size
-    json_data = json.dumps(point_cloud_data, separators=(',', ':')).encode('utf-8')
-
-    #Defines file paths
-    json_file_path = os.path.join(JSON_data_path, f"{point_cloud_name}_points_colors.json.gz")
-
-    #Write to JSON file
-    print("Compressing JSON...")
-    with gzip.open(json_file_path, 'wb') as f:
-        f.write(json_data)
-
-    print("Combined JSON file compressed and saved at: ", JSON_data_path, "in: ", time.time() - start_time, "seconds")
-             
 #Function to install libraries from a list using pip
 def install_libraries(library_list):
     for library in library_list:
@@ -2553,6 +2611,7 @@ def install_libraries(library_list):
             print(f"Successfully installed {library}")
         except subprocess.CalledProcessError as e:
             print(f"Error installing {library}: {e}")
+
 #Function to update libraries from a list using pip            
 def update_libraries(library_list):
     for library in library_list:
@@ -2561,6 +2620,7 @@ def update_libraries(library_list):
             print(f"Successfully updated {library}")
         except subprocess.CalledProcessError as e:
             print(f"Error updating {library}: {e}")
+
 #Function to uninstall libraries from a list using pip            
 def uninstall_libraries(library_list):
     for library in library_list:
@@ -2570,6 +2630,97 @@ def uninstall_libraries(library_list):
         except subprocess.CalledProcessError as e:
             print(f"Error uninstall {library}: {e}")   
                              
+#function to save the shape as an image
+def save_shape_as_image(obj):
+    
+    obj_name=obj.name
+    save_shape_checkbox = bpy.context.scene.save_shape
+    if obj_name =="Thin Line":
+        return
+    
+    if save_shape_checkbox:
+        #Ensure the object exists
+        if not obj:
+            raise ValueError(f"Object {obj_name} not found.")
+        
+        #Get the directory of the current Blender file
+        blend_file_path = bpy.data.filepath
+    
+        if blend_file_path:
+            directory = os.path.dirname(blend_file_path)
+        else:
+        #Prompt the user to save the file first or set a default directory
+            print("please save blender project first!")
+            return
+
+        #Create a folder 'road_mark_images' if it doesn't exist
+        images_dir = os.path.join(directory, 'road_mark_images')
+        if not os.path.exists(images_dir):
+            os.makedirs(images_dir)
+
+
+        #Set up rendering
+        bpy.context.scene.render.engine = 'CYCLES'  #or 'BLENDER_EEVEE'
+        bpy.context.scene.render.image_settings.file_format = 'JPEG'
+        bpy.context.scene.render.resolution_x = 256
+        bpy.context.scene.render.resolution_y = 256
+        bpy.context.scene.render.resolution_percentage = 100
+
+        #Set up camera
+        cam = bpy.data.cameras.new("Camera")
+        cam_ob = bpy.data.objects.new("Camera", cam)
+        bpy.context.scene.collection.objects.link(cam_ob)
+        bpy.context.scene.camera = cam_ob
+
+        #Use orthographic camera
+        cam.type = 'ORTHO'
+
+        #Calculate the bounding box of the object
+        local_bbox_corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
+        min_corner = Vector(local_bbox_corners[0])
+        max_corner = Vector(local_bbox_corners[6])
+
+        #Position the camera
+        bbox_center = (min_corner + max_corner) / 2
+        bbox_size = max_corner - min_corner
+        cam_ob.location = bbox_center + Vector((0, 0, max(bbox_size.x, bbox_size.y, bbox_size.z)))
+
+        #Adjust the orthographic scale to 75%
+        cam.ortho_scale = 1.33 * max(bbox_size.x, bbox_size.y)
+
+        #Point the camera downward
+        cam_ob.rotation_euler = (0, 0, 0)
+
+        #Set up lighting
+        light = bpy.data.lights.new(name="Light", type='POINT')
+        light_ob = bpy.data.objects.new(name="Light", object_data=light)
+        bpy.context.scene.collection.objects.link(light_ob)
+        light_ob.location = cam_ob.location + Vector((0, 0, 2))
+        light.energy = 50
+        light.energy += 100* max(0, cam_ob.location.z-1)
+        print("light energy: ",light.energy)
+        #light.energy=10
+        
+        #Set object material to bright white
+        mat = bpy.data.materials.new(name="WhiteMaterial")
+        mat.diffuse_color = (1, 1, 1, 1)  #White color
+        obj.data.materials.clear()
+        obj.data.materials.append(mat)
+
+        #Set world background to black
+        bpy.context.scene.world.use_nodes = True
+        bpy.context.scene.world.node_tree.nodes["Background"].inputs[0].default_value = (0, 0, 0, 1)  #Black color
+        
+        #Render and save the image with object's name
+        file_path = os.path.join(images_dir, f'{obj_name}.png')
+        bpy.context.scene.render.filepath = file_path
+        bpy.ops.render.render(write_still=True)
+        print("saved image to: ",file_path)
+        #Cleanup: delete the created camera, light, and material
+        bpy.data.objects.remove(cam_ob)
+        bpy.data.objects.remove(light_ob)
+        bpy.data.materials.remove(mat)
+        print("deleted camera, light, and material")
 
 
 
@@ -3211,6 +3362,30 @@ def snap_line_to_road_mark(self, context, first_click_point, last_click_point,po
     print("Snapped to road mark")
     return new_first_click_point, new_last_click_point
 
+#Function to check if a mouseclick is on a white object
+def is_click_on_white(self, context, location, neighbors=6):
+    pointcloud_data = GetPointCloudData()
+    point_colors = pointcloud_data.point_colors
+    points_kdtree=  pointcloud_data.points_kdtree
+    intensity_threshold = context.scene.intensity_threshold
+
+    #Define the number of nearest neighbors to search for
+    num_neighbors = neighbors
+    
+    #Use the k-d tree to find the nearest points to the click location
+    _, nearest_indices = points_kdtree.query([location], k=num_neighbors)
+    
+    average_intensity=get_average_intensity(nearest_indices,point_colors)
+
+    print(average_intensity)
+
+    #If the average intensity is above the threshold, return True (click is on a "white" object)
+    if average_intensity > intensity_threshold:
+        return True
+    else:
+        print("Intensity threshold not met")
+        return False
+
 
 
 
@@ -3571,98 +3746,6 @@ def region_growing(point_coords,point_colors,points_kdtree,nearest_indices,radiu
 
 
 #AI functions
-#function to save the shape as an image
-def save_shape_as_image(obj):
-    
-    obj_name=obj.name
-    save_shape_checkbox = context.scene.save_shape
-    if obj_name =="Thin Line":
-        return
-    
-    if save_shape_checkbox:
-        #Ensure the object exists
-        if not obj:
-            raise ValueError(f"Object {obj_name} not found.")
-        
-        #Get the directory of the current Blender file
-        blend_file_path = bpy.data.filepath
-    
-        if blend_file_path:
-            directory = os.path.dirname(blend_file_path)
-        else:
-        #Prompt the user to save the file first or set a default directory
-            print("please save blender project first!")
-            return
-
-        #Create a folder 'road_mark_images' if it doesn't exist
-        images_dir = os.path.join(directory, 'road_mark_images')
-        if not os.path.exists(images_dir):
-            os.makedirs(images_dir)
-
-
-        #Set up rendering
-        bpy.context.scene.render.engine = 'CYCLES'  #or 'BLENDER_EEVEE'
-        bpy.context.scene.render.image_settings.file_format = 'JPEG'
-        bpy.context.scene.render.resolution_x = 256
-        bpy.context.scene.render.resolution_y = 256
-        bpy.context.scene.render.resolution_percentage = 100
-
-        #Set up camera
-        cam = bpy.data.cameras.new("Camera")
-        cam_ob = bpy.data.objects.new("Camera", cam)
-        bpy.context.scene.collection.objects.link(cam_ob)
-        bpy.context.scene.camera = cam_ob
-
-        #Use orthographic camera
-        cam.type = 'ORTHO'
-
-        #Calculate the bounding box of the object
-        local_bbox_corners = [obj.matrix_world @ Vector(corner) for corner in obj.bound_box]
-        min_corner = Vector(local_bbox_corners[0])
-        max_corner = Vector(local_bbox_corners[6])
-
-        #Position the camera
-        bbox_center = (min_corner + max_corner) / 2
-        bbox_size = max_corner - min_corner
-        cam_ob.location = bbox_center + Vector((0, 0, max(bbox_size.x, bbox_size.y, bbox_size.z)))
-
-        #Adjust the orthographic scale to 75%
-        cam.ortho_scale = 1.33 * max(bbox_size.x, bbox_size.y)
-
-        #Point the camera downward
-        cam_ob.rotation_euler = (0, 0, 0)
-
-        #Set up lighting
-        light = bpy.data.lights.new(name="Light", type='POINT')
-        light_ob = bpy.data.objects.new(name="Light", object_data=light)
-        bpy.context.scene.collection.objects.link(light_ob)
-        light_ob.location = cam_ob.location + Vector((0, 0, 2))
-        light.energy = 50
-        light.energy += 100* max(0, cam_ob.location.z-1)
-        print("light energy: ",light.energy)
-        #light.energy=10
-        
-        #Set object material to bright white
-        mat = bpy.data.materials.new(name="WhiteMaterial")
-        mat.diffuse_color = (1, 1, 1, 1)  #White color
-        obj.data.materials.clear()
-        obj.data.materials.append(mat)
-
-        #Set world background to black
-        bpy.context.scene.world.use_nodes = True
-        bpy.context.scene.world.node_tree.nodes["Background"].inputs[0].default_value = (0, 0, 0, 1)  #Black color
-        
-        #Render and save the image with object's name
-        file_path = os.path.join(images_dir, f'{obj_name}.png')
-        bpy.context.scene.render.filepath = file_path
-        bpy.ops.render.render(write_still=True)
-        print("saved image to: ",file_path)
-        #Cleanup: delete the created camera, light, and material
-        bpy.data.objects.remove(cam_ob)
-        bpy.data.objects.remove(light_ob)
-        bpy.data.materials.remove(mat)
-        print("deleted camera, light, and material")
-
 #Function that uses Opencv for shape detection done on points    
 def detect_shape_from_points(points, from_bmesh=False, scale_factor=100):
 
@@ -3770,7 +3853,62 @@ class LAS_OT_AutoOpenOperator(bpy.types.Operator):
      
      
          
-#UI     
+#UI
+#Operator for the pop-up dialog
+class PopUpOperator(bpy.types.Operator):
+    bl_idname = "wm.correction_pop_up"
+    bl_label = "Confirm correction pop up"
+    bl_description = "Pop up to confirm"
+    
+    average_intensity: bpy.props.FloatProperty()
+    adjust_action: bpy.props.StringProperty()
+    
+    action: bpy.props.EnumProperty(
+        items=[
+            ('CONTINUE', "Yes", "Yes"),
+            ('STOP', "No", "No"),
+        ],
+        default='CONTINUE',
+    )
+    #Define the custom draw method
+    def draw(self, context):
+        layout = self.layout
+        col = layout.column()
+        
+        #Add custom buttons to the UI
+        if self.adjust_action=='LOWER':
+            col.label(text="No road marks found. Try with lower threshold?")
+        elif self.adjust_action=='HIGHER':
+            col.label(text="Threshold might be too low, Try with higher threshold?")
+        col.label(text="Choose an action:")
+        col.separator()
+        
+        #Use 'props_enum' to create buttons for each enum property
+        layout.props_enum(self, "action")
+        
+    def execute(self, context):
+
+        #Based on the user's choice, perform the action
+        context.scene.user_input_result = self.action
+       
+        if self.action == 'CONTINUE':
+           if self.adjust_action=='LOWER':
+               old_threshold=context.scene.intensity_threshold
+               context.scene.intensity_threshold=self.average_intensity-20 #lower the threshold to the average intensity around the mouseclick
+               print("changed intensity threshold from: ",old_threshold,"to: ",self.average_intensity," please try again")
+           elif self.adjust_action=='HIGHER':
+               old_threshold=context.scene.intensity_threshold
+               context.scene.intensity_threshold=self.average_intensity-30 #higher the threshold to the average intensity around the mouseclick 
+               print("changed intensity threshold from: ",old_threshold,"to: ",self.average_intensity," please try again")
+        elif self.action == 'STOP':
+            return {'CANCELLED'}
+        
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self)
+    
 #Panel for the Road Marking Digitizer
 class DIGITIZE_PT_Panel(bpy.types.Panel):
     bl_label = "Road Marking Digitizer"
@@ -3902,7 +4040,7 @@ def register():
     bpy.utils.register_class(PopUpOperator)
     bpy.utils.register_class(CenterPointCloudOperator)
     bpy.utils.register_class(ExportToShapeFileOperator)
-    bpy.utils.register_class(FindALlRoadMarkingsOperator)
+    bpy.utils.register_class(FindAllRoadMarkingsOperator)
     bpy.utils.register_class(DashedLineMarkingOperator)
     
     
@@ -4064,7 +4202,7 @@ def unregister():
     bpy.utils.unregister_class(SimpleMarkOperator)
     bpy.utils.unregister_class(ComplexMarkOperator)
     bpy.utils.unregister_class(SelectionDetectionOpterator)
-    bpy.utils.unregister_class(FindALlRoadMarkingsOperator)  
+    bpy.utils.unregister_class(FindAllRoadMarkingsOperator)  
     bpy.utils.unregister_class(FixedTriangleMarkOperator)
     bpy.utils.unregister_class(FixedRectangleMarkOperator) 
     bpy.utils.unregister_class(TriangleMarkOperator)

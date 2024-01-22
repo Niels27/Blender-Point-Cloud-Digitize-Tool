@@ -19,17 +19,17 @@ from scipy.interpolate import UnivariateSpline, make_interp_spline, CubicSpline
 
 #Math functions
 #function to filter bad points
-def filter_noise_with_dbscan(coords_list, eps=0.1, min_samples=20):
+def filter_noise_with_dbscan(coords_list, eps=0.15, min_samples=20):
     #DBSCAN clustering
     eps=float(eps)
     min_samples=int(min_samples)
     db = DBSCAN(eps=eps, min_samples=min_samples).fit(coords_list)
 
-    # Create a mask for the points belonging to clusters (excluding noise labeled as -1)
+    #Create a mask for the points belonging to clusters (excluding noise labeled as -1)
     core_samples_mask = np.zeros_like(db.labels_, dtype=bool)
     core_samples_mask[db.core_sample_indices_] = True
 
-    # Filter the coordinates: keep only those points that are part of a cluster
+    #Filter the coordinates: keep only those points that are part of a cluster
     filtered_coords = [
         coords for coords, is_core in zip(coords_list, core_samples_mask) if is_core
     ]
@@ -79,25 +79,25 @@ def get_average_color(indices,point_colors):
  
 #Function to move triangle to a line
 def move_triangle_to_line(triangle, line_start, line_end):
-    # Convert inputs to numpy arrays for easier calculations
+    #Convert inputs to numpy arrays for easier calculations
     triangle_np = np.array(triangle)
     line_start_np = np.array(line_start)
     line_end_np = np.array(line_end)
 
-    # Identify the base vertices (the two closest to the line)
+    #Identify the base vertices (the two closest to the line)
     base_vertex_indices = find_base_vertices(triangle_np, line_start_np, line_end_np)
     base_vertices = triangle_np[base_vertex_indices]
 
-    # Find the closest points on the line for the base vertices
+    #Find the closest points on the line for the base vertices
     closest_points = [
         closest_point(vertex, line_start_np, line_end_np) for vertex in base_vertices
     ]
 
-    # Move the base vertices to the closest points on the line
+    #Move the base vertices to the closest points on the line
     triangle_np[base_vertex_indices] = closest_points
 
     #Calculate the height of the triangle to reposition the third vertex
-    third_vertex_index = 3 - sum(base_vertex_indices)  # indices should be 0, 1, 2
+    third_vertex_index = 3 - sum(base_vertex_indices)  #indices should be 0, 1, 2
     height_vector = triangle_np[third_vertex_index] - np.mean(base_vertices, axis=0)
     triangle_np[third_vertex_index] = np.mean(closest_points, axis=0) + height_vector
 
@@ -110,7 +110,7 @@ def find_base_vertices(triangle, line_start, line_end):
         for vertex in triangle
     ]
     sorted_indices = np.argsort(distances)
-    return sorted_indices[:2]  # Indices of the two closest vertices
+    return sorted_indices[:2]  #Indices of the two closest vertices
 
 #Function to find the closest vertex to a line
 def find_closest_vertex_to_line(triangle, line_start, line_end):
@@ -205,7 +205,7 @@ def find_cluster_points(context, click_point, direction, range,point_coords,poin
 
     return None
 
-# function to calculate middle points of a line
+#function to calculate middle points of a line
 def create_middle_points(coords_list, num_segments=10):
     coords_np = np.array(coords_list)
 
@@ -222,33 +222,33 @@ def create_middle_points(coords_list, num_segments=10):
     top_right = rightmost_points[rightmost_points[:, 1].argmax()]
     bottom_right = rightmost_points[rightmost_points[:, 1].argmin()]
 
-    # Initialize the middle points list with the leftmost middle point
+    #Initialize the middle points list with the leftmost middle point
     middle_points = [(top_left + bottom_left) / 2]
 
     #Divide the remaining line into segments
     segment_width = (rightmost_x - leftmost_x) / (num_segments - 1)
 
     for i in range(1, num_segments):
-        # Determine the segment boundaries
+        #Determine the segment boundaries
         x_min = leftmost_x + i * segment_width
         x_max = leftmost_x + (i + 1) * segment_width
 
-        # Filter points in the current segment
+        #Filter points in the current segment
         segment_points = coords_np[
             (coords_np[:, 0] >= x_min) & (coords_np[:, 0] < x_max)
         ]
 
         if len(segment_points) > 0:
-            # Find the top and bottom points in this segment
+            #Find the top and bottom points in this segment
             top_point = segment_points[segment_points[:, 1].argmax()]
             bottom_point = segment_points[segment_points[:, 1].argmin()]
 
-            # Calculate the middle point
+            #Calculate the middle point
             middle_point = (top_point + bottom_point) / 2
             middle_points.append(middle_point)
             mark_point(middle_point, "middle_point")
 
-    # Add the rightmost middle point at the end
+    #Add the rightmost middle point at the end
     middle_points.append((top_right + bottom_right) / 2)
 
     mark_point(top_left, "top_left")
@@ -260,21 +260,21 @@ def create_middle_points(coords_list, num_segments=10):
 
 #Function to Find the four corner points of the rectangle formed by the given points.
 def find_rectangle_corners(points):
-    # Extract X and Y coordinates
+    #Extract X and Y coordinates
     x_coords = points[:, 0]
     y_coords = points[:, 1]
 
-    # Find extremal values for X and Y coordinates
+    #Find extremal values for X and Y coordinates
     min_x, max_x = np.min(x_coords), np.max(x_coords)
     min_y, max_y = np.min(y_coords), np.max(y_coords)
 
-    # Define corners based on extremal points
+    #Define corners based on extremal points
     bottom_left = np.array([min_x, min_y])
     bottom_right = np.array([max_x, min_y])
     top_right = np.array([max_x, max_y])
     top_left = np.array([min_x, max_y])
 
-    # Combine corners into a single array
+    #Combine corners into a single array
     corners = np.array([bottom_left, bottom_right, top_right, top_left])
     for corner in corners:
         mark_point(corner, "corner")
@@ -282,18 +282,18 @@ def find_rectangle_corners(points):
 
 #Function to calculate the middle line of the rectangle formed by the corners.
 def calculate_middle_line(corners):
-    # Calculate the midpoints of opposite sides
+    #Calculate the midpoints of opposite sides
     midpoint_left = (
         corners[0] + corners[3]
-    ) / 2  # Midpoint of bottom_left and top_left
+    ) / 2  #Midpoint of bottom_left and top_left
     midpoint_right = (
         corners[1] + corners[2]
-    ) / 2  # Midpoint of bottom_right and top_right
+    ) / 2  #Midpoint of bottom_right and top_right
     mark_point(midpoint_left, "midpoint1")
     mark_point(midpoint_right, "midpoint2")
     return midpoint_left, midpoint_right
 
-# function to snap the drawn line to the center line of the rectangle formed by the cluster.
+#function to snap the drawn line to the center line of the rectangle formed by the cluster.
 def snap_line_to_center_line(first_click_point, second_click_point, cluster):
     corners = find_rectangle_corners(cluster)
     line_start, line_end = calculate_middle_line(corners)
@@ -341,11 +341,12 @@ def calculate_adjusted_extreme_points(points):
     return avg_lowest_point, avg_highest_point
 
 #Function that defines a region growing algoritm
-def region_growing(point_coords,point_colors,points_kdtree,nearest_indices,radius,intensity_threshold,region_growth_coords,time_limit=10):
-    # Region growing algorithm
+def region_growing(point_coords,point_colors,points_kdtree,nearest_indices,radius,intensity_threshold, time_limit=10):
+    #Region growing algorithm
     start_time = time.time()
     checked_indices = set()
     indices_to_check = list(nearest_indices[0])
+    region_growth_coords=[]
     print("Region growing started")
     while indices_to_check:
         current_time = time.time()
@@ -369,6 +370,7 @@ def region_growing(point_coords,point_colors,points_kdtree,nearest_indices,radiu
                 )
     print("Region growing completed in: ", time.time() - start_time)
     return region_growth_coords, checked_indices
+
 
 
 # module imports

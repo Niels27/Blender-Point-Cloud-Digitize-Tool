@@ -74,7 +74,7 @@ def register():
     bpy.utils.register_class(PopUpOperator)
     bpy.utils.register_class(CenterPointCloudOperator)
     bpy.utils.register_class(ExportToShapeFileOperator)
-    bpy.utils.register_class(FindALLRoadMarkingsOperator)
+    bpy.utils.register_class(FindAllRoadMarkingsOperator)
     bpy.utils.register_class(DashedLineMarkingOperator)
 
     
@@ -236,7 +236,7 @@ def unregister():
     bpy.utils.unregister_class(SimpleMarkOperator)
     bpy.utils.unregister_class(ComplexMarkOperator)
     bpy.utils.unregister_class(SelectionDetectionOpterator)
-    bpy.utils.unregister_class(FindALLRoadMarkingsOperator)  
+    bpy.utils.unregister_class(FindAllRoadMarkingsOperator)  
     bpy.utils.unregister_class(FixedTriangleMarkOperator)
     bpy.utils.unregister_class(FixedRectangleMarkOperator) 
     bpy.utils.unregister_class(TriangleMarkOperator)

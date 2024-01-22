@@ -16,6 +16,7 @@ from mathutils import Vector, Matrix
 import mathutils
 import pandas as pd
 import geopandas as gpd
+from sklearn.decomposition import PCA
 
 #global variables
 shape_counter=1 #Keeps track of amount of shapes drawn, used to number them
@@ -118,23 +119,31 @@ def create_fixed_triangle(coords, side_length=0.5):
 
 #Function to create a flexible rectangle shape out of coordinates
 def create_flexible_rectangle(coords):
-    
     extra_z_height = bpy.context.scene.extra_z_height
     coords_np = np.array(coords)
 
-    #Find minimum and maximum X and Y coordinates ignoring Z-coordinate if present
-    min_x = np.min(coords_np[:, 0])
-    max_x = np.max(coords_np[:, 0])
-    min_y = np.min(coords_np[:, 1])
-    max_y = np.max(coords_np[:, 1])
+    # Apply PCA to find the principal axes
+    pca = PCA(n_components=2)  # We only need the first two components for a rectangle
+    pca.fit(coords_np[:, :2])  # Fit to X and Y coordinates
 
-    #Create rectangle corners 
-    top_left = (min_x, max_y, extra_z_height)
-    top_right = (max_x, max_y, extra_z_height)
-    bottom_right = (max_x, min_y, extra_z_height)
-    bottom_left = (min_x, min_y, extra_z_height)
+    # Get the center and the two principal components
+    center = pca.mean_
+    transformed_coords = pca.transform(coords_np[:, :2])
+    component1_length = (np.max(transformed_coords[:, 0]) - np.min(transformed_coords[:, 0])) / 2
+    component2_length = (np.max(transformed_coords[:, 1]) - np.min(transformed_coords[:, 1])) / 2
+    component1 = pca.components_[0] * component1_length
+    component2 = pca.components_[1] * component2_length
 
-    return [top_left, top_right, bottom_right, bottom_left]
+    # Calculate rectangle corners based on principal components
+    top_left = center + component1 - component2
+    top_right = center + component1 + component2
+    bottom_left = center - component1 - component2
+    bottom_right = center - component1 + component2
+
+    # Add Z-coordinate
+    rectangle_corners = [(x, y, extra_z_height) for x, y in [top_left, top_right, bottom_right, bottom_left]]
+
+    return rectangle_corners
 
 #Function to create a fixed rectangle shape at a location
 def create_fixed_square(context, location, size=1.0):
@@ -203,10 +212,10 @@ def create_polyline(points,name='Poly Line', width=0.01, color=(1, 0, 0, 1)):
 
 #Function to create segments of a given size out of points
 def create_fixed_length_segments(points, segment_length=1.0):
-    # function generates points on a polyline with fixed segment lengths
-    extended_points = [Vector(points[0])]  # Start with the first point
-    total_distance = 0  # Keep track of the total distance
-    segment_count = 0  # Count the number of full segments
+    #function generates points on a polyline with fixed segment lengths
+    extended_points = [Vector(points[0])]  #Start with the first point
+    total_distance = 0  #Keep track of the total distance
+    segment_count = 0  #Count the number of full segments
 
     for i in range(1, len(points)):
         start_point = Vector(points[i - 1])
@@ -226,7 +235,7 @@ def create_fixed_length_segments(points, segment_length=1.0):
             segment_distance -= segment_length
             segment_count += 1
 
-        # Add the last point if it doesn't fit a full segment
+        #Add the last point if it doesn't fit a full segment
         if segment_distance > 0:
             extended_points.append(end_point)
 
@@ -234,9 +243,9 @@ def create_fixed_length_segments(points, segment_length=1.0):
     if total_distance % segment_length != 0:
         extended_points[-1] = extended_points[-2] + segment_vector * (total_distance % segment_length)
 
-    return extended_points, total_distance, segment_count + 1  # Include the last partial segment
+    return extended_points, total_distance, segment_count + 1  #Include the last partial segment
 
-#Class defining the factory design pattern for creating different shapes
+#Class defining the factory design pattern for creating shapes
 class ShapeFactory:
     def __init__(self):
         self.marking_color = bpy.context.scene.marking_color
@@ -322,7 +331,6 @@ def create_shape(coords_list, shape_type, vertices=None, filter_coords=True):
     else:
         print(f"Shape type '{shape_type}' is not recognized.")
         
-    
 #Function to create a mesh object
 def create_mesh_with_material(obj_name, shape_coords, marking_color, transparency):
     
@@ -393,7 +401,7 @@ def draw_line(self, context, event,point_coords, point_colors, points_kdtree):
 def find_cluster_center(context, click_point, direction, range,point_coords, point_colors, points_kdtree):
     intensity_threshold = context.scene.intensity_threshold
    
-    # Define the search bounds and find points within the bounds
+    #Define the search bounds and find points within the bounds
     upper_bound = click_point + direction * range
     lower_bound = click_point - direction * range
     indices = points_kdtree.query_ball_point([upper_bound, lower_bound], range)
@@ -402,16 +410,16 @@ def find_cluster_center(context, click_point, direction, range,point_coords, poi
     high_intensity_points = potential_points[np.average(point_colors[indices], axis=1) > intensity_threshold]
 
     if len(high_intensity_points) > 0:
-        # Find the outer points
+        #Find the outer points
         min_x = np.min(high_intensity_points[:, 0])
         max_x = np.max(high_intensity_points[:, 0])
         min_y = np.min(high_intensity_points[:, 1])
         max_y = np.max(high_intensity_points[:, 1])
 
-        # Calculate the center of these extremal points
+        #Calculate the center of these extremal points
         center_x = (min_x + max_x) / 2
         center_y = (min_y + max_y) / 2
-        center_z = np.mean(high_intensity_points[:, 2])  # Average Z value
+        center_z = np.mean(high_intensity_points[:, 2])  #Average Z value
   
         mark_point(Vector((center_x, center_y, center_z)), "cluster_center")
         return Vector((center_x, center_y, center_z))
@@ -503,7 +511,7 @@ def create_dots_shape(coords_list,name="Dots Shape", filter_points=True):
 
     square_size = 0.05  #Size of each square
     z_offset = extra_z_height  #Offset in Z coordinate
-    max_gap = 10  #Maximum gap size to fill
+    max_gap = 100  #Maximum gap size to fill
 
     if filter_points:
         #filters out bad points
@@ -633,7 +641,7 @@ def snap_line_to_road_mark(self, context, first_click_point, last_click_point,po
     def snap_last_point(_first_click_point, _last_click_point):
        
         #Perform region growing on the last click point
-        region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, region_radius, intensity_threshold, region_growth_coords)         
+        region_growth_coords,checked_indices=region_growing(point_coords, point_colors, points_kdtree, nearest_indices, region_radius, intensity_threshold)         
 
         if region_growth_coords:
             edge1, edge2 = find_outward_points(region_growth_coords, perp_direction)

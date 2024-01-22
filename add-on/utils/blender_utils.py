@@ -34,70 +34,49 @@ point_cloud_name = "Point cloud"
 point_cloud_point_size = 1
 collection_name = "Collection" #the default collection name in blender
 
-# Blender utility functions
-
-
-# Function to Check whether the mouseclick happened in the viewport or elsewhere
+#Blender utility functions                        
+#Function to Check whether the mouseclick happened in the viewport or elsewhere    
 def is_mouse_in_3d_view(context, event):
-    # Identify the 3D Viewport area and its regions
-    view_3d_area = next(
-        (area for area in context.screen.areas if area.type == "VIEW_3D"), None
-    )
+    
+    #Identify the 3D Viewport area and its regions
+    view_3d_area = next((area for area in context.screen.areas if area.type == 'VIEW_3D'), None)
     if view_3d_area is not None:
-        toolbar_region = next(
-            (region for region in view_3d_area.regions if region.type == "TOOLS"), None
-        )
-        ui_region = next(
-            (region for region in view_3d_area.regions if region.type == "UI"), None
-        )
-        view_3d_window_region = next(
-            (region for region in view_3d_area.regions if region.type == "WINDOW"), None
-        )
+        toolbar_region = next((region for region in view_3d_area.regions if region.type == 'TOOLS'), None)
+        ui_region = next((region for region in view_3d_area.regions if region.type == 'UI'), None)
+        view_3d_window_region = next((region for region in view_3d_area.regions if region.type == 'WINDOW'), None)
 
-        # Check if the mouse is inside the 3D Viewport's window region
+        #Check if the mouse is inside the 3D Viewport's window region
         if view_3d_window_region is not None:
             mouse_inside_view3d = (
-                view_3d_window_region.x
-                < event.mouse_x
-                < view_3d_window_region.x + view_3d_window_region.width
-                and view_3d_window_region.y
-                < event.mouse_y
-                < view_3d_window_region.y + view_3d_window_region.height
+                view_3d_window_region.x < event.mouse_x < view_3d_window_region.x + view_3d_window_region.width and 
+                view_3d_window_region.y < event.mouse_y < view_3d_window_region.y + view_3d_window_region.height
             )
-
-            # Exclude areas occupied by the toolbar or UI regions
+            
+            #Exclude areas occupied by the toolbar or UI regions
             if toolbar_region is not None:
                 mouse_inside_view3d &= not (
-                    toolbar_region.x
-                    < event.mouse_x
-                    < toolbar_region.x + toolbar_region.width
-                    and toolbar_region.y
-                    < event.mouse_y
-                    < toolbar_region.y + toolbar_region.height
+                    toolbar_region.x < event.mouse_x < toolbar_region.x + toolbar_region.width and 
+                    toolbar_region.y < event.mouse_y < toolbar_region.y + toolbar_region.height
                 )
             if ui_region is not None:
                 mouse_inside_view3d &= not (
-                    ui_region.x < event.mouse_x < ui_region.x + ui_region.width
-                    and ui_region.y < event.mouse_y < ui_region.y + ui_region.height
+                    ui_region.x < event.mouse_x < ui_region.x + ui_region.width and 
+                    ui_region.y < event.mouse_y < ui_region.y + ui_region.height
                 )
-
+            
             return mouse_inside_view3d
 
-    return False  # Default to False if checks fail.
+    return False  #Default to False if checks fail.        
 
-
-# function to get 3D click point
+#function to get 3D click point
 def get_click_point_in_3d(context, event):
-    # Convert the mouse position to 3D space
+    #Convert the mouse position to 3D space
     coord_3d = view3d_utils.region_2d_to_location_3d(
-        context.region,
-        context.space_data.region_3d,
+        context.region, context.space_data.region_3d,
         (event.mouse_region_x, event.mouse_region_y),
-        Vector((0, 0, 0)),
+        Vector((0, 0, 0))
     )
     return coord_3d
-
-
 
 #Function to store obj state
 def prepare_object_for_export(obj):
@@ -192,6 +171,7 @@ def set_origin_to_geometry_center(obj, return_obj=True):
     if return_obj:
         return obj
 
+#Function to export mesh to object
 def export_mesh_to_obj(mesh, file_path, mtl_name):
     #Open the file for writing the OBJ file
     with open(file_path, 'w') as file:
@@ -210,6 +190,7 @@ def export_mesh_to_obj(mesh, file_path, mtl_name):
                 face_line += f" {vert + 1}"  # OBJ files are 1-indexed
             file.write(f"{face_line}\n")
 
+#Function to export material to mtl file
 def export_material_to_mtl(mtl_path, mtl_name):
     #Open the file for writing the MTL file
     with open(mtl_path, 'w') as file:
@@ -223,6 +204,7 @@ def export_material_to_mtl(mtl_path, mtl_name):
         file.write("d 1.0000\n")  # transparency
         file.write("illum 2\n")  # Illumination 
 
+#Function to export all objects from a collection
 def export_objects_from_collection(collection_name, export_directory):
     # Ensure the export directory exists
     os.makedirs(export_directory, exist_ok=True)
@@ -251,27 +233,77 @@ def export_objects_from_collection(collection_name, export_directory):
             #Export the material
             export_material_to_mtl(mtl_file_path, obj.name)
 
-
-# Function to force top view in the viewport
+#Function to force top view in the viewport
 def set_view_to_top(context):
-    # Find the first 3D View
+    
+    #Find the first 3D View
     for area in context.screen.areas:
-        if area.type == "VIEW_3D":
-            # Get the 3D View
+        if area.type == 'VIEW_3D':
+            #Get the 3D View
             space_data = area.spaces.active
 
-            # Get the current rotation in Euler angles
+            #Get the current rotation in Euler angles
             current_euler = space_data.region_3d.view_rotation.to_euler()
 
-            # Set the Z-axis rotation to 0, retaining X and Y rotations
-            new_euler = mathutils.Euler((math.radians(0), 0, current_euler.z), "XYZ")
+            #Set the Z-axis rotation to 0, retaining X and Y rotations
+            new_euler = mathutils.Euler((math.radians(0), 0, current_euler.z), 'XYZ')
             space_data.region_3d.view_rotation = new_euler.to_quaternion()
-
-            # Update the view
+            
+            #Update the view
             area.tag_redraw()
             break
+   
+#Function to clears the viewport and delete the draw handler
+def redraw_viewport():
+    
+    #global draw_handler  #Reference the global variable
+    draw_handler = bpy.app.driver_namespace.get('my_draw_handler')
+    
+    if draw_handler is not None:
+        #Remove the handler reference, stopping the draw calls
+        bpy.types.SpaceView3D.draw_handler_remove(draw_handler, 'WINDOW')
+        #draw_handler = None
+        del bpy.app.driver_namespace['my_draw_handler']
 
-#Function to save an image of a shape
+        print("Draw handler removed successfully.")
+        print("Stopped drawing the point cloud.")
+
+    #Redraw the 3D view to reflect the removal of the point cloud
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()        
+                
+    print("viewport redrawn")
+
+#Function to install libraries from a list using pip
+def install_libraries(library_list):
+    for library in library_list:
+        try:
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', library])
+            print(f"Successfully installed {library}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error installing {library}: {e}")
+
+#Function to update libraries from a list using pip            
+def update_libraries(library_list):
+    for library in library_list:
+        try:
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install','--upgrade', library])
+            print(f"Successfully updated {library}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error updating {library}: {e}")
+
+#Function to uninstall libraries from a list using pip            
+def uninstall_libraries(library_list):
+    for library in library_list:
+        try:
+            subprocess.check_call([sys.executable, '-m', 'pip', 'uninstall', library])
+            print(f"Successfully uninstall {library}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error uninstall {library}: {e}")   
+                             
+#function to save the shape as an image
 def save_shape_as_image(obj):
     
     obj_name=obj.name
@@ -362,57 +394,4 @@ def save_shape_as_image(obj):
         bpy.data.objects.remove(light_ob)
         bpy.data.materials.remove(mat)
         print("deleted camera, light, and material")
-
-# Function to clears the viewport and delete the draw handler
-def redraw_viewport():
-    # global draw_handler  #Reference the global variable
-    draw_handler = bpy.app.driver_namespace.get("my_draw_handler")
-
-    if draw_handler is not None:
-        # Remove the handler reference, stopping the draw calls
-        bpy.types.SpaceView3D.draw_handler_remove(draw_handler, "WINDOW")
-        # draw_handler = None
-        del bpy.app.driver_namespace["my_draw_handler"]
-
-        print("Draw handler removed successfully.")
-        print("Stopped drawing the point cloud.")
-
-    # Redraw the 3D view to reflect the removal of the point cloud
-    for window in bpy.context.window_manager.windows:
-        for area in window.screen.areas:
-            if area.type == "VIEW_3D":
-                area.tag_redraw()
-
-    print("viewport redrawn")
-
-# Function to install libraries from a list using pip
-def install_libraries(library_list):
-    for library in library_list:
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", library])
-            print(f"Successfully installed {library}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error installing {library}: {e}")
-
-# Function to update libraries from a list using pip
-def update_libraries(library_list):
-    for library in library_list:
-        try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "--upgrade", library]
-            )
-            print(f"Successfully updated {library}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error updating {library}: {e}")
-
-# Function to uninstall libraries from a list using pip
-def uninstall_libraries(library_list):
-    for library in library_list:
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "uninstall", library])
-            print(f"Successfully uninstall {library}")
-        except subprocess.CalledProcessError as e:
-            print(f"Error uninstall {library}: {e}")
-
-
 

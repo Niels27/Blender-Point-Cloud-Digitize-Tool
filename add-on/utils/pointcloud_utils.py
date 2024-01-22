@@ -34,7 +34,7 @@ point_cloud_name = "Point cloud"
 point_cloud_point_size = 1
 collection_name = "Collection" #the default collection name in blender
 
-# Blender utility functions
+# Point cloud utility functions
 # Singleton class to save point cloud data
 class GetPointCloudData:
     _instance = None

@@ -174,17 +174,17 @@ class CenterPointCloudOperator(bpy.types.Operator):
         #view3d.region_3d.view_rotation = bpy.context.scene.camera.rotation_euler  #Maintaining the current rotation
         view3d.region_3d.view_distance = viewport_height  #Distance from the view point
 
-        # Ensure there is an active camera in the scene
+        #Ensure there is an active camera in the scene
         if bpy.context.scene.camera:
             bpy.context.scene.camera.data.type = 'ORTHO' #Set the camera type to Orthographic, alternatively is PERSP for perspective
         for area in bpy.context.screen.areas:
             if area.type == 'VIEW_3D':
-                # Access the 3D View's region data
+                #Access the 3D View's region data
                 for space in area.spaces:
                     if space.type == 'VIEW_3D':
-                        # Set the viewport to Orthographic projection
+                        #Set the viewport to Orthographic projection
                         space.region_3d.view_perspective = 'ORTHO'
-                        break  # Exit the loop once the first 3D view is found and set
+                        break  #Exit the loop once the first 3D view is found and set
                     
         return {'FINISHED'}
 
